@@ -17,7 +17,9 @@ import java.io.UnsupportedEncodingException;
 import java.math.BigInteger;
 import java.security.*;
 import java.security.spec.InvalidKeySpecException;
+import java.security.spec.KeySpec;
 import java.security.spec.X509EncodedKeySpec;
+import java.util.Arrays;
 
 import javax.crypto.*;
 import javax.crypto.interfaces.DHPublicKey;
@@ -50,6 +52,10 @@ class MyChatClient extends ChatClient {
     private String password = null;
     private String uid = null;
     private Boolean SECURED_MODE = false;
+
+    //aes key
+    private SecretKey secretKey;
+    private SecretKey  symmetricKeyAES;
 
 
     MyChatClient(boolean IsA) { // This is the minimum constructor you must
@@ -209,92 +215,123 @@ class MyChatClient extends ChatClient {
     public void PacketfromServer(byte[] buf) {
         ByteArrayInputStream is = new ByteArrayInputStream(buf);
         ObjectInput in = null;
+        ChatPacket p;
         try {
-            in = new ObjectInputStream(is);
-            Object o = in.readObject();
-            ChatPacket p = (ChatPacket) o;
+
+            if(!SECURED_MODE)
+            {
+                in = new ObjectInputStream(is);
+                Object o = in.readObject();
+                p = (ChatPacket) o;
+
+                if (p.request == ChatRequest.DH_PUBLIC_KEY) {
+                    try {
+                        System.out.println("client receive public from server");
+
+                        //client private key
+                        KeyAgreement keyAgreement = KeyAgreement.getInstance("DH");
+                        keyAgreement.init(keyPairClient.getPrivate());
+
+                        //server public key
+                        KeyFactory keyFactory = KeyFactory.getInstance("DH");
+                        X509EncodedKeySpec x509EncodedKeySpec = new X509EncodedKeySpec(p.data);
+                        PublicKey publicKey = keyFactory.generatePublic(x509EncodedKeySpec);
+                        keyAgreement.doPhase(publicKey, true);
+
+                        //create secret key
+                        byte sharedSecret[] = keyAgreement.generateSecret();
 
 
-            if (p.request == ChatRequest.DH_PUBLIC_KEY) {
-                try {
-                    System.out.println("client receive public from server");
-
-                    //client private key
-                    KeyAgreement keyAgreement = KeyAgreement.getInstance("DH");
-                    keyAgreement.init(keyPairClient.getPrivate());
-
-                    //server public key
-                    KeyFactory keyFactory = KeyFactory.getInstance("DH");
-                    X509EncodedKeySpec x509EncodedKeySpec = new X509EncodedKeySpec(p.data);
-                    PublicKey publicKey = keyFactory.generatePublic(x509EncodedKeySpec);
-                    keyAgreement.doPhase(publicKey, true);
-
-                    //create secret key
-                    //SecretKey secretKey = keyAgreement.generateSecret("AES");
-                    byte sharedSecret[] = keyAgreement.generateSecret();
 
 
-                    //des key
-                    SecretKeyFactory skf = SecretKeyFactory.getInstance("DES");
-                    DESKeySpec desSpec = new DESKeySpec(sharedSecret);
-                    DesSecretKey = skf.generateSecret(desSpec);
+                        //aes key
+                        //String salt = generateSalt();
 
-                    //try to login with password
-                    ChatPacket loginMsg = new ChatPacket();
-                    loginMsg.request = ChatRequest.LOGIN;
-                    loginMsg.uid = this.uid;
-                    loginMsg.password = this.password;
+                        //http://javadoc.iaik.tugraz.at/iaik_jce/current/iaik/pkcs/pkcs5/PBKDF2.html
+                        //SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
+                        //KeySpec spec = new PBEKeySpec((new String(sharedSecret)).toCharArray(), salt.getBytes(), 10000, 256);
+                        //SecretKey temp = factory.generateSecret(spec);
+                        //secretKey = new SecretKeySpec(temp.getEncoded(), "AES");
+                        //System.out.println(secretKey.getEncoded().length);  // 32bytes = 256 bit
 
-                    SECURED_MODE = true;
-                    SerializeNSend(loginMsg);
+                        symmetricKeyAES = AES.generateKey(sharedSecret);
 
 
-                } catch (NoSuchAlgorithmException | InvalidKeyException | InvalidKeySpecException e) {
-                    e.printStackTrace();
+
+
+
+
+
+
+
+
+                        //try to login with password
+                        ChatPacket loginMsg = new ChatPacket();
+                        loginMsg.request = ChatRequest.LOGIN;
+                        loginMsg.uid = this.uid;
+                        loginMsg.password = this.password;
+
+                        SECURED_MODE = true;
+                        SerializeNSend(loginMsg);
+
+
+                    } catch (NoSuchAlgorithmException | InvalidKeyException | InvalidKeySpecException e) {
+                        e.printStackTrace();
+                    }
+                }
+            }else
+            {
+                p = AES.decrypt(is,symmetricKeyAES);
+
+                if (p.request == ChatRequest.RESPONSE && p.success.equals("LOGIN")) {
+                    // This indicates a successful login
+                    curUser = p.uid;
+
+                    // Time to load the chatlog
+                    InputStream ins = null;
+                    JsonReader jsonReader;
+                    File f = new File(this.getChatLogPath());
+                    if (f.exists() && !f.isDirectory()) {
+                        try {
+                            ins = new FileInputStream(this.getChatLogPath());
+                            jsonReader = Json.createReader(ins);
+                            chatlog = jsonReader.readArray();
+                        } catch (FileNotFoundException e) {
+                            System.err.println("Chatlog file could not be opened.");
+                        }
+                    } else {
+                        try {
+                            f.createNewFile();
+                            ins = new FileInputStream(this.getChatLogPath());
+                            chatlog = Json.createArrayBuilder().build();
+                        } catch (IOException e) {
+                            System.err.println("Chatlog file could not be created or opened.");
+                        }
+                    }
+
+                    RefreshList();
+
+                } else if (p.request == ChatRequest.RESPONSE && p.success.equals("LOGOUT")) {
+                    // Logged out, save chat log and clear messages on the UI
+                    SaveChatHistory();
+                    curUser = "";
+                    UpdateMessages(null);
+                } else if (p.request == ChatRequest.CHAT && !curUser.equals("")) {
+                    // A new chat message received
+                    Add1Message(p.uid, curUser, p.data);
+                } else if (p.request == ChatRequest.CHAT_ACK && !curUser.equals("")) {
+                    // This was sent by us and now it's confirmed by the server, add
+                    // it to chat history
+                    Add1Message(curUser, p.uid, p.data);
                 }
             }
 
-            if (p.request == ChatRequest.RESPONSE && p.success.equals("LOGIN")) {
-                // This indicates a successful login
-                curUser = p.uid;
 
-                // Time to load the chatlog
-                InputStream ins = null;
-                JsonReader jsonReader;
-                File f = new File(this.getChatLogPath());
-                if (f.exists() && !f.isDirectory()) {
-                    try {
-                        ins = new FileInputStream(this.getChatLogPath());
-                        jsonReader = Json.createReader(ins);
-                        chatlog = jsonReader.readArray();
-                    } catch (FileNotFoundException e) {
-                        System.err.println("Chatlog file could not be opened.");
-                    }
-                } else {
-                    try {
-                        f.createNewFile();
-                        ins = new FileInputStream(this.getChatLogPath());
-                        chatlog = Json.createArrayBuilder().build();
-                    } catch (IOException e) {
-                        System.err.println("Chatlog file could not be created or opened.");
-                    }
-                }
 
-                RefreshList();
 
-            } else if (p.request == ChatRequest.RESPONSE && p.success.equals("LOGOUT")) {
-                // Logged out, save chat log and clear messages on the UI
-                SaveChatHistory();
-                curUser = "";
-                UpdateMessages(null);
-            } else if (p.request == ChatRequest.CHAT && !curUser.equals("")) {
-                // A new chat message received
-                Add1Message(p.uid, curUser, p.data);
-            } else if (p.request == ChatRequest.CHAT_ACK && !curUser.equals("")) {
-                // This was sent by us and now it's confirmed by the server, add
-                // it to chat history
-                Add1Message(curUser, p.uid, p.data);
-            }
+
+
+
 
         } catch (IOException e) {
             e.printStackTrace();
@@ -353,11 +390,15 @@ class MyChatClient extends ChatClient {
                 try {
 
                     //encrypt
-                    Cipher c = Cipher.getInstance("DES");
-                    c.init(Cipher.ENCRYPT_MODE, DesSecretKey);
-                    byte[] encrypted = c.doFinal(packet);
-                    sealedObject = new SealedObject(packet,c);
-                    packet = encrypted;
+                    //Cipher c = Cipher.getInstance("DES");
+                    //c.init(Cipher.ENCRYPT_MODE, DesSecretKey);
+                    System.out.println("ciphermaxlength: "+Cipher.getMaxAllowedKeyLength("AES/ECB/PKCS5Padding"));
+                    Cipher c = Cipher.getInstance("AES/ECB/PKCS5Padding");
+
+                    c.init(Cipher.ENCRYPT_MODE, symmetricKeyAES);
+
+
+                    packet = c.doFinal(packet);
 
                 } catch (NoSuchPaddingException e) {
                     e.printStackTrace();
@@ -415,6 +456,13 @@ class MyChatClient extends ChatClient {
         chatlog = newl;
         RefreshList();
 
+    }
+
+    public static String generateSalt() {
+        SecureRandom random = new SecureRandom();
+        byte bytes[] = new byte[20];
+        random.nextBytes(bytes);
+        return new String(bytes);
     }
 
 
