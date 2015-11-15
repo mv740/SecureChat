@@ -13,19 +13,16 @@ import java.io.ObjectOutputStream;
 import java.security.*;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.X509EncodedKeySpec;
-import java.util.Arrays;
 
 import javax.crypto.*;
 import javax.crypto.interfaces.DHPublicKey;
-import javax.crypto.spec.DESKeySpec;
-import javax.crypto.spec.DHGenParameterSpec;
 import javax.crypto.spec.DHParameterSpec;
-import javax.crypto.spec.SecretKeySpec;
 import javax.json.Json;
 import javax.json.JsonArray;
 import javax.json.JsonObject;
 import javax.json.JsonReader;
 
+import com.sun.org.apache.bcel.internal.generic.IADD;
 import infrastructure.ChatServer;
 
 /**
@@ -51,9 +48,9 @@ class MyChatServer extends ChatServer {
     String statB = "";
 
     //keys
-    private Boolean SECURED_MODE = false;
-    private SecretKey symmetricKeyAES;
+    private boolean[] SECURED_MODE;
     private SecretKey[] symmetricKeyStore;
+
 
     // In Constructor, the user database is loaded.
     MyChatServer() {
@@ -61,6 +58,11 @@ class MyChatServer extends ChatServer {
             InputStream in = new FileInputStream("database.json");
             JsonReader jsonReader = Json.createReader(in);
             database = jsonReader.readArray();
+            SECURED_MODE = new boolean[2];
+            System.out.println(SECURED_MODE[0]);
+
+            symmetricKeyStore = new SecretKey[2];
+
 
         } catch (FileNotFoundException e) {
             System.err.println("Database file not found!");
@@ -83,22 +85,14 @@ class MyChatServer extends ChatServer {
 
         //http://docs.oracle.com/javase/7/docs/technotes/guides/security/crypto/CryptoSpec.html#DH2Ex
         //http://docstore.mik.ua/orelly/java-ent/security/ch13_07.htm
-        //todo "is" that packet is encrypted, we need to decrypt it before being able to parse it to a object
-//        if (SECURED_MODE) {
-//            //for testing
-//            System.out.println("encryption packet detected");
-//            ChatPacket hello = AES.decrypt(is, symmetricKeyAES);
-//            System.out.println(hello.password);
-//
-//
-//        }
+
 
         try {
             ChatPacket p;
 
-
-            if (SECURED_MODE) {
-                p = AES.decrypt(is, symmetricKeyAES);
+            if (SECURED_MODE[User.getUser(IsA)]) {
+                System.out.println(symmetricKeyStore[User.getUser(IsA)]);
+                p = AES.decrypt(is, symmetricKeyStore[User.getUser(IsA)]);
 
                 if (p.request == ChatRequest.LOGIN) {
                     // We want to go through all records
@@ -108,7 +102,8 @@ class MyChatServer extends ChatServer {
 
                         // When both uid and pwd match
                         if (l.getString("uid").equals(p.uid)
-                                && l.getString("password").equals(p.password)) {
+                                && l.getString("password").equals(p.password))
+                        {
                             System.out.println("Authenticated USER");
                             // We do not allow one user to be logged in on multiple
                             // clients
@@ -129,6 +124,20 @@ class MyChatServer extends ChatServer {
                             RespondtoClient(IsA, "LOGIN");
 
                             break;
+                        } else
+                        {
+                            if (IsA) {
+                                statA = "";
+                            } else {
+                                statB = "";
+                            }
+
+                            //todo need to fixe this where you have wrong input password, you need to click logout button before it you can login sucessfully after.
+                            System.out.println("ERROR SERVER LOGIN");
+                            UpdateLogin(!IsA, "");
+                            System.out.println("LOGIN ERROR FROM ALICE : "+ IsA);
+                            RespondtoClient(!IsA,"failure");
+                            securedConnectionStop(!IsA);
                         }
 
                     }
@@ -143,10 +152,10 @@ class MyChatServer extends ChatServer {
                     } else {
                         statB = "";
                     }
-                    SECURED_MODE = false;
-                    symmetricKeyAES = null;
                     UpdateLogin(IsA, "");
                     RespondtoClient(IsA, "LOGOUT");
+                    securedConnectionStop(IsA);
+
 
                 } else if (p.request == ChatRequest.CHAT) {
                     // This is a chat message
@@ -154,13 +163,29 @@ class MyChatServer extends ChatServer {
                     // Whoever is sending it must be already logged in
                     if ((IsA && statA != "") || (!IsA && statB != "")) {
                         // Forward the original packet to the recipient
-                        SendtoClient(!IsA, buf);
-                        p.request = ChatRequest.CHAT_ACK;
-                        p.uid = (IsA ? statB : statA);
 
-                        // Flip the uid and send it back to the sender for updating
-                        // chat history
-                        SerializeNSend(IsA, p);
+
+                        //receiver must be logged in to received
+                        if (IsA) {
+
+                            SerializeNSend(!IsA, p);
+
+                            if (statB != "") {
+                                refreshSenderUI(IsA, p);
+
+                            }
+
+                        }
+                        if (!IsA) {
+                            SerializeNSend(!IsA, p);
+
+                            if (statA != "") {
+                                refreshSenderUI(IsA, p);
+                            }
+
+                        }
+
+
                     }
                 }
             } else {
@@ -200,8 +225,9 @@ class MyChatServer extends ChatServer {
                             byte[] sharedSecret = serverKeyAgreement.generateSecret();
 
                             //create AES key
-                            symmetricKeyAES = AES.generateKey(sharedSecret);
-                           // symmetricKeyStore[(p.uid)] = symmetricKeyAES;
+                            SecretKey symmetricKeyAES = AES.generateKey(sharedSecret);
+                            System.out.println("TEST GET USER" + User.getUser(IsA));
+                            symmetricKeyStore[User.getUser(IsA)] = symmetricKeyAES;
 
 
                             //server encode his public key and send to client
@@ -237,6 +263,15 @@ class MyChatServer extends ChatServer {
         }
     }
 
+    private void refreshSenderUI(boolean IsA, ChatPacket p) {
+        // Flip the uid and send it back to the sender for updating
+        // chat history
+        p.request = ChatRequest.CHAT_ACK;
+        p.uid = (IsA ? statB : statA);
+        SerializeNSend(IsA, p);
+    }
+
+
     /**
      * Methods for updating UI
      */
@@ -255,6 +290,7 @@ class MyChatServer extends ChatServer {
      */
     private void SerializeNSend(boolean IsA, ChatPacket p) {
 
+        System.out.println("sending to user ALICE: " + IsA);
         //ChatRequest test = p.request;
 
         ByteArrayOutputStream os = new ByteArrayOutputStream();
@@ -264,18 +300,13 @@ class MyChatServer extends ChatServer {
             out.writeObject(p);
             byte[] packet = os.toByteArray();
 
-            if(SECURED_MODE)
-            {
-                System.out.println("SEND SERVER SECURED MSG");
-                packet = AES.encrypt(packet,symmetricKeyAES);
+            if (SECURED_MODE[User.getUser(IsA)]) {
+                packet = AES.encrypt(packet, symmetricKeyStore[User.getUser(IsA)]);
             }
             SendtoClient(IsA, packet);
 
-            if(p.request == ChatRequest.DH_PUBLIC_KEY)
-            {
-                System.out.println("ACTIVATE ENCRYPTION ");
-                SECURED_MODE = true;
-            }
+
+            securedConnectionStart(p, IsA);
 
 
         } catch (IOException e) {
@@ -295,6 +326,7 @@ class MyChatServer extends ChatServer {
         }
     }
 
+
     /**
      * This method composes the packet needed to respond to a client (indicated
      * by IsA) regarding whether the login/logout request was successful
@@ -310,4 +342,20 @@ class MyChatServer extends ChatServer {
         SerializeNSend(IsA, p);
     }
 
+
+    private void securedConnectionStart(ChatPacket p, Boolean IsA) {
+        if (p.request == ChatRequest.DH_PUBLIC_KEY) {
+            System.out.println("ACTIVATE ENCRYPTION ");
+            SECURED_MODE[User.getUser(IsA)] = true;
+        }
+    }
+
+    private void securedConnectionStop(Boolean IsA) {
+        System.out.println("DESACTIVATED ENCRYPTION");
+        SECURED_MODE[User.getUser(IsA)] = false;
+        symmetricKeyStore[User.getUser(IsA)] = null;
+    }
+
+
 }
+

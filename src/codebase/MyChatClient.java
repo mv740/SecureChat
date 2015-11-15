@@ -1,25 +1,10 @@
 package codebase;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.ObjectInput;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutput;
-import java.io.ObjectOutputStream;
-import java.io.OutputStream;
-import java.io.UnsupportedEncodingException;
+import java.io.*;
 import java.math.BigInteger;
 import java.security.*;
 import java.security.spec.InvalidKeySpecException;
-import java.security.spec.KeySpec;
 import java.security.spec.X509EncodedKeySpec;
-import java.util.Arrays;
 
 import javax.crypto.*;
 import javax.crypto.interfaces.DHPublicKey;
@@ -29,8 +14,8 @@ import javax.json.JsonArray;
 import javax.json.JsonArrayBuilder;
 import javax.json.JsonReader;
 import javax.json.JsonWriter;
+import javax.json.stream.JsonParsingException;
 
-import com.sun.crypto.provider.AESKeyGenerator;
 import infrastructure.ChatClient;
 
 /**
@@ -48,20 +33,34 @@ class MyChatClient extends ChatClient {
 
     private PublicKey serverPublicKey = null;
     private KeyPair keyPairClient = null;
-    private SecretKey DesSecretKey = null;
     private String password = null;
     private String uid = null;
-    private Boolean SECURED_MODE = false;
+    private Boolean  SECURED_MODE = Boolean.FALSE;
+
+    private Boolean isAlice;
+
+
 
     //aes key
-    private SecretKey secretKey;
-    private SecretKey  symmetricKeyAES;
+    private SecretKey symmetricKeyAES;
+
+    //security
+    //keys
 
 
-    MyChatClient(boolean IsA) { // This is the minimum constructor you must
+    //Logkey
+    private SecretKey LogKey;
+
+
+    MyChatClient(boolean IsA) {
+
+
+        // This is the minimum constructor you must
         // preserve
         super(IsA); // IsA indicates whether it's client A or B
+        this.isAlice = IsA;
         startComm(); // starts the communication
+
     }
 
     /**
@@ -87,10 +86,10 @@ class MyChatClient extends ChatClient {
         p.uid = uid;
         p.password = pwd;
 
-        if (pwd.length()>0) {
+        if (pwd.length() > 0) {
             this.uid = uid;
             this.password = pwd;
-            startKeyPair(uid, pwd);
+            startKeyPair(uid);
         } else
             SerializeNSend(p);
     }
@@ -102,7 +101,7 @@ class MyChatClient extends ChatClient {
      * @param uid
      */
     //Diffie-Hellman key agreement
-    public void startKeyPair(String uid, String pwd) {
+    public void startKeyPair(String uid) {
         try {
             KeyPairGenerator kpg = KeyPairGenerator.getInstance("DH");
             kpg.initialize(1024);
@@ -218,8 +217,8 @@ class MyChatClient extends ChatClient {
         ChatPacket p;
         try {
 
-            if(!SECURED_MODE)
-            {
+
+            if (SECURED_MODE == false) {
                 in = new ObjectInputStream(is);
                 Object o = in.readObject();
                 p = (ChatPacket) o;
@@ -241,28 +240,7 @@ class MyChatClient extends ChatClient {
                         //create secret key
                         byte sharedSecret[] = keyAgreement.generateSecret();
 
-
-
-
-                        //aes key
-                        //String salt = generateSalt();
-
-                        //http://javadoc.iaik.tugraz.at/iaik_jce/current/iaik/pkcs/pkcs5/PBKDF2.html
-                        //SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
-                        //KeySpec spec = new PBEKeySpec((new String(sharedSecret)).toCharArray(), salt.getBytes(), 10000, 256);
-                        //SecretKey temp = factory.generateSecret(spec);
-                        //secretKey = new SecretKeySpec(temp.getEncoded(), "AES");
-                        //System.out.println(secretKey.getEncoded().length);  // 32bytes = 256 bit
-
                         symmetricKeyAES = AES.generateKey(sharedSecret);
-
-
-
-
-
-
-
-
 
 
                         //try to login with password
@@ -271,7 +249,7 @@ class MyChatClient extends ChatClient {
                         loginMsg.uid = this.uid;
                         loginMsg.password = this.password;
 
-                        SECURED_MODE = true;
+                        SECURED_MODE = Boolean.TRUE;
                         SerializeNSend(loginMsg);
 
 
@@ -279,9 +257,8 @@ class MyChatClient extends ChatClient {
                         e.printStackTrace();
                     }
                 }
-            }else
-            {
-                p = AES.decrypt(is,symmetricKeyAES);
+            } else {
+                p = AES.decrypt(is, symmetricKeyAES);
 
                 if (p.request == ChatRequest.RESPONSE && p.success.equals("LOGIN")) {
                     // This indicates a successful login
@@ -292,13 +269,31 @@ class MyChatClient extends ChatClient {
                     JsonReader jsonReader;
                     File f = new File(this.getChatLogPath());
                     if (f.exists() && !f.isDirectory()) {
-                        try {
+
+
+                        String uniqueHostIdentifier = getDiskSerialNumber();
+                        LogKey = AES.generateKey(uniqueHostIdentifier.getBytes());
+
+
+                        //http://superuser.com/questions/498083/how-to-get-hard-drive-serial-number-from-command-line
+
+
+                        //ins = new FileInputStream(this.getChatLogPath());
+                        try{
+                            //first time program is run, log is still not encrypted
                             ins = new FileInputStream(this.getChatLogPath());
                             jsonReader = Json.createReader(ins);
                             chatlog = jsonReader.readArray();
-                        } catch (FileNotFoundException e) {
-                            System.err.println("Chatlog file could not be opened.");
                         }
+                        catch (JsonParsingException e)
+                        {
+                            System.out.println("encrypted log files detected");
+                            ins = AES.decrypt(this.getChatLogPath(), LogKey);
+                            jsonReader = Json.createReader(ins);
+                            chatlog = jsonReader.readArray();
+
+                        }
+
                     } else {
                         try {
                             f.createNewFile();
@@ -311,11 +306,19 @@ class MyChatClient extends ChatClient {
 
                     RefreshList();
 
-                } else if (p.request == ChatRequest.RESPONSE && p.success.equals("LOGOUT")) {
+                }else if (p.request == ChatRequest.RESPONSE && p.success.equals("failure")) {
+                    System.out.println("ERROR LOGIN account client");
+                    symmetricKeyAES = null;
+                    curUser = "";
+                    UpdateMessages(null);
+                    SECURED_MODE = Boolean.FALSE;
+                }
+                else if (p.request == ChatRequest.RESPONSE && p.success.equals("LOGOUT")) {
                     // Logged out, save chat log and clear messages on the UI
                     SaveChatHistory();
                     curUser = "";
                     UpdateMessages(null);
+                    SECURED_MODE = Boolean.FALSE;
                 } else if (p.request == ChatRequest.CHAT && !curUser.equals("")) {
                     // A new chat message received
                     Add1Message(p.uid, curUser, p.data);
@@ -325,12 +328,6 @@ class MyChatClient extends ChatClient {
                     Add1Message(curUser, p.uid, p.data);
                 }
             }
-
-
-
-
-
-
 
 
         } catch (IOException e) {
@@ -358,17 +355,15 @@ class MyChatClient extends ChatClient {
     public void SaveChatHistory() {
         if (curUser.equals(""))
             return;
-        try {
-            // The chatlog file is named after both the client and the user
-            // logged in
+        // The chatlog file is named after both the client and the user
+        // logged in
 
-            OutputStream out = new FileOutputStream(this.getChatLogPath());
-            JsonWriter writer = Json.createWriter(out);
-            writer.writeArray(chatlog);
-            writer.close();
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
-        }
+
+        //OutputStream out = new FileOutputStream(this.getChatLogPath());
+        OutputStream out = AES.encrypt(this.getChatLogPath(), LogKey);
+        JsonWriter writer = Json.createWriter(out);
+        writer.writeArray(chatlog);
+        writer.close();
 
     }
 
@@ -384,36 +379,9 @@ class MyChatClient extends ChatClient {
             out = new ObjectOutputStream(os);
             out.writeObject(p);
             byte[] packet = os.toByteArray();
-            SealedObject sealedObject = null;
 
             if (SECURED_MODE) {
-                try {
-
-                    //encrypt
-                    //Cipher c = Cipher.getInstance("DES");
-                    //c.init(Cipher.ENCRYPT_MODE, DesSecretKey);
-                    System.out.println("ciphermaxlength: "+Cipher.getMaxAllowedKeyLength("AES/ECB/PKCS5Padding"));
-                    Cipher c = Cipher.getInstance("AES/ECB/PKCS5Padding");
-
-                    c.init(Cipher.ENCRYPT_MODE, symmetricKeyAES);
-
-
-                    packet = c.doFinal(packet);
-
-                } catch (NoSuchPaddingException e) {
-                    e.printStackTrace();
-                } catch (NoSuchAlgorithmException e) {
-                    e.printStackTrace();
-                }catch (InvalidKeyException e) {
-                    e.printStackTrace();
-                }catch (BadPaddingException e){
-                    e.printStackTrace();
-                }catch (IllegalBlockSizeException e)
-                {
-                    e.printStackTrace();
-                }
-
-
+                packet = AES.encrypt(packet, symmetricKeyAES);
             }
             SendtoServer(packet);
         } catch (IOException e) {
@@ -458,11 +426,41 @@ class MyChatClient extends ChatClient {
 
     }
 
-    public static String generateSalt() {
-        SecureRandom random = new SecureRandom();
-        byte bytes[] = new byte[20];
-        random.nextBytes(bytes);
-        return new String(bytes);
+
+    //http://www.mkyong.com/java/how-to-execute-shell-command-from-java/
+    private String executeCommand(String command) {
+
+        StringBuffer output = new StringBuffer();
+
+        java.lang.Process p;
+        try {
+            p = Runtime.getRuntime().exec(command);
+            p.waitFor();
+            BufferedReader reader =
+                    new BufferedReader(new InputStreamReader(p.getInputStream()));
+
+            String line = "";
+            while ((line = reader.readLine()) != null) {
+                output.append(line); //removed the "\n"
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        return output.toString();
+
+    }
+
+    private String getDiskSerialNumber() {
+        //wmic diskdrive get serialnumber
+        String queryResult = executeCommand("wmic diskdrive get serialnumber");
+        //ignore SerialNumber word
+        System.out.println(queryResult);
+        String result = queryResult.replaceAll("\\s", ""); //removed formating tab/whitespaces
+        System.out.println(result);
+        return result.substring("SerialNumber".length()); //removed this word
+
     }
 
 

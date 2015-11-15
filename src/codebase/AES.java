@@ -2,10 +2,11 @@ package codebase;
 
 import javax.crypto.*;
 import javax.crypto.spec.SecretKeySpec;
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.io.ObjectInput;
-import java.io.ObjectInputStream;
+import javax.json.Json;
+import javax.json.JsonArray;
+import javax.json.JsonReader;
+import javax.json.stream.JsonParsingException;
+import java.io.*;
 import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -14,6 +15,11 @@ import java.security.NoSuchAlgorithmException;
  * Created by micha on 11/14/2015.
  */
 public class AES {
+
+    public enum mode {
+        ENCRYPT,
+        DECRYPT
+    }
 
     public static SecretKey generateKey(byte[] sharedSecret) {
         MessageDigest md;
@@ -77,7 +83,7 @@ public class AES {
 
             ObjectInput objectInput = new ObjectInputStream(cis);
             Object object = objectInput.readObject();
-            chatPacket = (ChatPacket)object;
+            chatPacket = (ChatPacket) object;
 
         } catch (NoSuchAlgorithmException e) {
             e.printStackTrace();
@@ -94,5 +100,91 @@ public class AES {
         return chatPacket;
 
     }
+
+    public static InputStream securedFile(mode mode, String fileName, SecretKey key) {
+
+
+        Cipher cipher;
+        InputStream inputStream = null;
+        byte[] output = null;
+        try {
+            cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
+            switch (mode) {
+                case ENCRYPT:
+                    cipher.init(Cipher.ENCRYPT_MODE, key);
+                    // OutputStream out = new FileOutputStream(this.getChatLogPath());
+                    break;
+                case DECRYPT:
+                    cipher.init(Cipher.DECRYPT_MODE, key);
+                    inputStream = new CipherInputStream(new FileInputStream(fileName), cipher);
+                    break;
+            }
+
+            inputStream = new CipherInputStream(new FileInputStream(fileName), cipher);
+
+
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        } catch (NoSuchPaddingException e) {
+            e.printStackTrace();
+        } catch (InvalidKeyException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        return inputStream;
+
+    }
+
+    public static OutputStream encrypt(String fileLocation, SecretKey key) {
+        Cipher cipher;
+        OutputStream outputStream = null;
+        try {
+            cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
+            cipher.init(Cipher.ENCRYPT_MODE, key);
+            outputStream = new CipherOutputStream(new FileOutputStream(fileLocation), cipher);
+
+
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        } catch (NoSuchPaddingException e) {
+            e.printStackTrace();
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        } catch (InvalidKeyException e) {
+            e.printStackTrace();
+        }
+
+        return outputStream;
+
+    }
+
+    public static InputStream decrypt(String fileLocation, SecretKey key) {
+        Cipher cipher;
+        InputStream inputStream = null;
+        try {
+
+            cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
+            cipher.init(Cipher.DECRYPT_MODE, key);
+            inputStream = new CipherInputStream(new FileInputStream(fileLocation), cipher);
+
+
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        } catch (NoSuchPaddingException e) {
+            e.printStackTrace();
+        } catch (FileNotFoundException e) {
+
+            System.err.println("Chatlog file could not be opened.");
+
+        } catch (InvalidKeyException e) {
+            e.printStackTrace();
+        }
+
+        return inputStream;
+
+    }
+
 
 }
