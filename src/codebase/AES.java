@@ -2,10 +2,6 @@ package codebase;
 
 import javax.crypto.*;
 import javax.crypto.spec.SecretKeySpec;
-import javax.json.Json;
-import javax.json.JsonArray;
-import javax.json.JsonReader;
-import javax.json.stream.JsonParsingException;
 import java.io.*;
 import java.security.InvalidKeyException;
 import java.security.MessageDigest;
@@ -16,10 +12,6 @@ import java.security.NoSuchAlgorithmException;
  */
 public class AES {
 
-    public enum mode {
-        ENCRYPT,
-        DECRYPT
-    }
 
     public static SecretKey generateKey(byte[] sharedSecret) {
         MessageDigest md;
@@ -101,41 +93,6 @@ public class AES {
 
     }
 
-    public static InputStream securedFile(mode mode, String fileName, SecretKey key) {
-
-
-        Cipher cipher;
-        InputStream inputStream = null;
-        byte[] output = null;
-        try {
-            cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
-            switch (mode) {
-                case ENCRYPT:
-                    cipher.init(Cipher.ENCRYPT_MODE, key);
-                    // OutputStream out = new FileOutputStream(this.getChatLogPath());
-                    break;
-                case DECRYPT:
-                    cipher.init(Cipher.DECRYPT_MODE, key);
-                    inputStream = new CipherInputStream(new FileInputStream(fileName), cipher);
-                    break;
-            }
-
-            inputStream = new CipherInputStream(new FileInputStream(fileName), cipher);
-
-
-        } catch (NoSuchAlgorithmException e) {
-            e.printStackTrace();
-        } catch (NoSuchPaddingException e) {
-            e.printStackTrace();
-        } catch (InvalidKeyException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-
-        return inputStream;
-
-    }
 
     public static OutputStream encrypt(String fileLocation, SecretKey key) {
         Cipher cipher;
@@ -183,6 +140,20 @@ public class AES {
         }
 
         return inputStream;
+
+    }
+
+    private static byte[] getIV(byte[] secretKey)
+    {
+        MessageDigest md = null;
+        byte[] iv = null;
+        try {
+            md = MessageDigest.getInstance("SHA1");
+            iv  = md.digest(secretKey);
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        }
+        return iv;
 
     }
 

@@ -90,9 +90,9 @@ class MyChatServer extends ChatServer {
         try {
             ChatPacket p;
 
-            if (SECURED_MODE[User.getUser(IsA)]) {
-                System.out.println(symmetricKeyStore[User.getUser(IsA)]);
-                p = AES.decrypt(is, symmetricKeyStore[User.getUser(IsA)]);
+            if (SECURED_MODE[getUser(IsA)]) {
+                System.out.println(symmetricKeyStore[getUser(IsA)]);
+                p = AES.decrypt(is, symmetricKeyStore[getUser(IsA)]);
 
                 if (p.request == ChatRequest.LOGIN) {
                     // We want to go through all records
@@ -126,25 +126,31 @@ class MyChatServer extends ChatServer {
                             break;
                         } else
                         {
-                            if (IsA) {
-                                statA = "";
-                            } else {
-                                statB = "";
-                            }
-
-                            //todo need to fixe this where you have wrong input password, you need to click logout button before it you can login sucessfully after.
-                            System.out.println("ERROR SERVER LOGIN");
-                            UpdateLogin(!IsA, "");
-                            System.out.println("LOGIN ERROR FROM ALICE : "+ IsA);
-                            RespondtoClient(!IsA,"failure");
-                            securedConnectionStop(!IsA);
+//                            if (IsA) {
+//                                statA = "";
+//                            } else {
+//                                statB = "";
+//                            }
+//
+//                            //todo need to fixe this where you have wrong input password, you need to click logout button before it you can login sucessfully after.
+//                            System.out.println("ERROR SERVER LOGIN");
+////                            UpdateLogin(!IsA, "");
+////                            System.out.println("LOGIN ERROR FROM ALICE : "+ IsA);
+////                            RespondtoClient(!IsA,"failure");
+////                            securedConnectionStop(!IsA);
+//                            UpdateLogin(!IsA, "");
+//                            System.out.println("LOGIN ERROR FROM ALICE : "+ IsA);
+//                            RespondtoClient(!IsA,"failure");
+////                            securedConnectionStop(!IsA);
                         }
 
                     }
 
-                    if ((IsA ? statA : statB).equals("")) {
+                    if ((IsA ? statA : statB).equals("access_denied")) {
                         // Oops, this means a failure, we tell the client so
+                        System.out.println("SYSTEM DENIED ACCESS");
                         RespondtoClient(IsA, "");
+                        securedConnectionStop(IsA);
                     }
                 } else if (p.request == ChatRequest.LOGOUT) {
                     if (IsA) {
@@ -166,15 +172,13 @@ class MyChatServer extends ChatServer {
 
 
                         //receiver must be logged in to received
+                        //SEND to authenticated user
                         if (IsA) {
-
                             SerializeNSend(!IsA, p);
-
                             if (statB != "") {
                                 refreshSenderUI(IsA, p);
 
                             }
-
                         }
                         if (!IsA) {
                             SerializeNSend(!IsA, p);
@@ -182,10 +186,7 @@ class MyChatServer extends ChatServer {
                             if (statA != "") {
                                 refreshSenderUI(IsA, p);
                             }
-
                         }
-
-
                     }
                 }
             } else {
@@ -226,8 +227,8 @@ class MyChatServer extends ChatServer {
 
                             //create AES key
                             SecretKey symmetricKeyAES = AES.generateKey(sharedSecret);
-                            System.out.println("TEST GET USER" + User.getUser(IsA));
-                            symmetricKeyStore[User.getUser(IsA)] = symmetricKeyAES;
+                            System.out.println("TEST GET USER" + getUser(IsA));
+                            symmetricKeyStore[getUser(IsA)] = symmetricKeyAES;
 
 
                             //server encode his public key and send to client
@@ -290,8 +291,7 @@ class MyChatServer extends ChatServer {
      */
     private void SerializeNSend(boolean IsA, ChatPacket p) {
 
-        System.out.println("sending to user ALICE: " + IsA);
-        //ChatRequest test = p.request;
+        //System.out.println("sending to user ALICE: " + IsA);
 
         ByteArrayOutputStream os = new ByteArrayOutputStream();
         ObjectOutput out = null;
@@ -300,12 +300,10 @@ class MyChatServer extends ChatServer {
             out.writeObject(p);
             byte[] packet = os.toByteArray();
 
-            if (SECURED_MODE[User.getUser(IsA)]) {
-                packet = AES.encrypt(packet, symmetricKeyStore[User.getUser(IsA)]);
+            if (SECURED_MODE[getUser(IsA)]) {
+                packet = AES.encrypt(packet, symmetricKeyStore[getUser(IsA)]);
             }
             SendtoClient(IsA, packet);
-
-
             securedConnectionStart(p, IsA);
 
 
@@ -345,17 +343,42 @@ class MyChatServer extends ChatServer {
 
     private void securedConnectionStart(ChatPacket p, Boolean IsA) {
         if (p.request == ChatRequest.DH_PUBLIC_KEY) {
-            System.out.println("ACTIVATE ENCRYPTION ");
-            SECURED_MODE[User.getUser(IsA)] = true;
+            //System.out.println("ACTIVATE ENCRYPTION ");
+            if(IsA)
+            {
+                this.UpdateServerLog("server initiate secured connection with alice");
+            }
+            else
+                this.UpdateServerLog("server initiate secured connection with Bob");
+            SECURED_MODE[getUser(IsA)] = true;
         }
     }
 
+
     private void securedConnectionStop(Boolean IsA) {
-        System.out.println("DESACTIVATED ENCRYPTION");
-        SECURED_MODE[User.getUser(IsA)] = false;
-        symmetricKeyStore[User.getUser(IsA)] = null;
+        //System.out.println("DEACTIVATED ENCRYPTION");
+        if(IsA)
+        {
+            this.UpdateServerLog("server stop secured connection with alice");
+        }
+        else
+            this.UpdateServerLog("server stop secured connection with Bob");
+        SECURED_MODE[getUser(IsA)] = false;
+        symmetricKeyStore[getUser(IsA)] = null;
     }
 
+
+    /**
+     * convert true/false into binary
+     *
+     * @param IsA is Alice
+     * @return binary 0/1
+     */
+    public static int getUser(boolean IsA) {
+        ////http://stackoverflow.com/questions/3793650/convert-boolean-to-int-in-java
+        // bool to integer
+        return Boolean.compare(IsA, false);
+    }
 
 }
 

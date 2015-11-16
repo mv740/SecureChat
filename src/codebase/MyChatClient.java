@@ -31,14 +31,10 @@ import infrastructure.ChatClient;
  */
 class MyChatClient extends ChatClient {
 
-    private PublicKey serverPublicKey = null;
     private KeyPair keyPairClient = null;
     private String password = null;
     private String uid = null;
-    private Boolean  SECURED_MODE = Boolean.FALSE;
-
-    private Boolean isAlice;
-
+    private boolean SECURED_MODE = false;
 
 
     //aes key
@@ -58,7 +54,6 @@ class MyChatClient extends ChatClient {
         // This is the minimum constructor you must
         // preserve
         super(IsA); // IsA indicates whether it's client A or B
-        this.isAlice = IsA;
         startComm(); // starts the communication
 
     }
@@ -86,7 +81,7 @@ class MyChatClient extends ChatClient {
         p.uid = uid;
         p.password = pwd;
 
-        if (pwd.length() > 0) {
+        if (pwd.length() > 0 && !SECURED_MODE) {
             this.uid = uid;
             this.password = pwd;
             startKeyPair(uid);
@@ -218,7 +213,7 @@ class MyChatClient extends ChatClient {
         try {
 
 
-            if (SECURED_MODE == false) {
+            if (!SECURED_MODE) {
                 in = new ObjectInputStream(is);
                 Object o = in.readObject();
                 p = (ChatPacket) o;
@@ -239,7 +234,6 @@ class MyChatClient extends ChatClient {
 
                         //create secret key
                         byte sharedSecret[] = keyAgreement.generateSecret();
-
                         symmetricKeyAES = AES.generateKey(sharedSecret);
 
 
@@ -249,7 +243,7 @@ class MyChatClient extends ChatClient {
                         loginMsg.uid = this.uid;
                         loginMsg.password = this.password;
 
-                        SECURED_MODE = Boolean.TRUE;
+                        SECURED_MODE = true;
                         SerializeNSend(loginMsg);
 
 
@@ -259,8 +253,10 @@ class MyChatClient extends ChatClient {
                 }
             } else {
                 p = AES.decrypt(is, symmetricKeyAES);
-
-                if (p.request == ChatRequest.RESPONSE && p.success.equals("LOGIN")) {
+                if (p.request == ChatRequest.RESPONSE && p.success.equals("access_denied")) {
+                    //System.out.println("ERROR LOGIN account client");
+                    reset();
+                } else if (p.request == ChatRequest.RESPONSE && p.success.equals("LOGIN")) {
                     // This indicates a successful login
                     curUser = p.uid;
 
@@ -270,23 +266,20 @@ class MyChatClient extends ChatClient {
                     File f = new File(this.getChatLogPath());
                     if (f.exists() && !f.isDirectory()) {
 
-
+                        // log file are encrypted using a unique identifer created from local user's hard disk serial number
+                        // to decrypt it, you will need you physically own  the hard disk
+                        //http://superuser.com/questions/498083/how-to-get-hard-drive-serial-number-from-command-line
                         String uniqueHostIdentifier = getDiskSerialNumber();
                         LogKey = AES.generateKey(uniqueHostIdentifier.getBytes());
 
 
-                        //http://superuser.com/questions/498083/how-to-get-hard-drive-serial-number-from-command-line
-
-
                         //ins = new FileInputStream(this.getChatLogPath());
-                        try{
+                        try {
                             //first time program is run, log is still not encrypted
                             ins = new FileInputStream(this.getChatLogPath());
                             jsonReader = Json.createReader(ins);
                             chatlog = jsonReader.readArray();
-                        }
-                        catch (JsonParsingException e)
-                        {
+                        } catch (JsonParsingException e) {
                             System.out.println("encrypted log files detected");
                             ins = AES.decrypt(this.getChatLogPath(), LogKey);
                             jsonReader = Json.createReader(ins);
@@ -306,19 +299,10 @@ class MyChatClient extends ChatClient {
 
                     RefreshList();
 
-                }else if (p.request == ChatRequest.RESPONSE && p.success.equals("failure")) {
-                    System.out.println("ERROR LOGIN account client");
-                    symmetricKeyAES = null;
-                    curUser = "";
-                    UpdateMessages(null);
-                    SECURED_MODE = Boolean.FALSE;
-                }
-                else if (p.request == ChatRequest.RESPONSE && p.success.equals("LOGOUT")) {
+                }  else if (p.request == ChatRequest.RESPONSE && p.success.equals("LOGOUT")) {
                     // Logged out, save chat log and clear messages on the UI
                     SaveChatHistory();
-                    curUser = "";
-                    UpdateMessages(null);
-                    SECURED_MODE = Boolean.FALSE;
+                    reset();
                 } else if (p.request == ChatRequest.CHAT && !curUser.equals("")) {
                     // A new chat message received
                     Add1Message(p.uid, curUser, p.data);
@@ -337,6 +321,8 @@ class MyChatClient extends ChatClient {
         }
 
     }
+
+
 
     /**
      * Gives the path of the local chat history file (user-based)
@@ -427,7 +413,13 @@ class MyChatClient extends ChatClient {
     }
 
 
-    //http://www.mkyong.com/java/how-to-execute-shell-command-from-java/
+    /**
+     * Enable to execute shell command from java
+     *
+     *     //http://www.mkyong.com/java/how-to-execute-shell-command-from-java/
+     * @param command shell command
+     * @return output of your command
+     */
     private String executeCommand(String command) {
 
         StringBuffer output = new StringBuffer();
@@ -452,6 +444,12 @@ class MyChatClient extends ChatClient {
 
     }
 
+    /**
+     * get the local user's hard disk serial number!
+     * This is unique because there can't be two hard disk with the same serial number
+     *
+     * @return serial number
+     */
     private String getDiskSerialNumber() {
         //wmic diskdrive get serialnumber
         String queryResult = executeCommand("wmic diskdrive get serialnumber");
@@ -463,5 +461,13 @@ class MyChatClient extends ChatClient {
 
     }
 
+    /**
+     * reset all information and clear the ui
+     */
+    private void reset() {
+        curUser = "";
+        UpdateMessages(null);
+        SECURED_MODE = false;
+    }
 
 }
