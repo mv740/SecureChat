@@ -60,6 +60,7 @@ class MyChatServer extends ChatServer {
     private byte[] clientNonceA;
     private byte[] clientNonceB;
 
+
     // In Constructor, the user database is loaded.
     MyChatServer() {
         try {
@@ -178,21 +179,32 @@ class MyChatServer extends ChatServer {
                         boolean UniqueNonce = false;
                         if (IsA) {
 
-                            System.out.println("client nonce received " + Arrays.toString(p.cnonce));
+                            clientNounceReceivedLog(p);
                             if (Objects.equals(Arrays.toString(clientNonceA), Arrays.toString(p.cnonce))) {
                                 //man in the middle attack, he is trying to replay attack
                                 //that cnonce was already used once !!!! WARNING
                                 this.UpdateServerLog("MAN in the middle ATTACK Detected!");
 
-
                             } else {
                                 UniqueNonce = true;
                                 serverHash = Encryption.generateHash(p.cnonce, serverNonceA, clientPassword);
-
                             }
 
                         } else {
-                            serverHash = Encryption.generateHash(p.cnonce, serverNonceB, clientPassword);
+                            clientNounceReceivedLog(p);
+                            if (Objects.equals(Arrays.toString(clientNonceB), Arrays.toString(p.cnonce))) {
+                                //man in the middle attack, he is trying to replay attack
+                                //that cnonce was already used once !!!! WARNING
+                                this.UpdateServerLog("MAN in the middle ATTACK Detected!");
+
+                            } else {
+                                UniqueNonce = true;
+                                serverHash = Encryption.generateHash(p.cnonce, serverNonceB, clientPassword);
+
+                            }
+
+
+
 
                         }
 
@@ -260,6 +272,10 @@ class MyChatServer extends ChatServer {
         } catch (ClassNotFoundException e) {
             e.printStackTrace();
         }
+    }
+
+    private void clientNounceReceivedLog(ChatPacket p) {
+        System.out.println("client nonce received " + Arrays.toString(p.cnonce));
     }
 
     private void refreshSenderUI(boolean IsA, ChatPacket p) {

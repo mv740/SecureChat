@@ -1,12 +1,13 @@
 package codebase;
 
 import javax.crypto.*;
+import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.*;
-import java.security.InvalidKeyException;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
+import java.security.*;
+import java.security.spec.InvalidParameterSpecException;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Created by micha on 11/14/2015.
@@ -48,10 +49,15 @@ public class Encryption {
         Cipher cipher;
         OutputStream outputStream = null;
         try {
-            cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
+            cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
             cipher.init(Cipher.ENCRYPT_MODE, key);
             outputStream = new CipherOutputStream(new FileOutputStream(fileLocation), cipher);
+            //System.out.println(fileLocation);
 
+            String ivFileName = getIVFileName(fileLocation);
+            //http://javapapers.com/java/java-file-encryption-decryption-using-aes-password-based-encryption-pbe/
+            //storing cbc iv in a specific folder
+            createIVFile(cipher, ivFileName);
 
         } catch (NoSuchAlgorithmException e) {
             e.printStackTrace();
@@ -61,9 +67,34 @@ public class Encryption {
             e.printStackTrace();
         } catch (InvalidKeyException e) {
             e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        } catch (InvalidParameterSpecException e) {
+            e.printStackTrace();
         }
 
         return outputStream;
+
+    }
+
+    private static String getIVFileName(String fileLocation) {
+        String name = findUserByLog(fileLocation);
+        return "log/"+name+".IV";
+    }
+
+    private static void createIVFile(Cipher cipher, String ivFileName) throws InvalidParameterSpecException, IOException {
+        FileOutputStream ivOutFile = new FileOutputStream(ivFileName);
+        AlgorithmParameters params = cipher.getParameters();
+        byte[] iv = params.getParameterSpec(IvParameterSpec.class).getIV();
+        ivOutFile.write(iv);
+        ivOutFile.close();
+    }
+
+    private static String findUserByLog(String fileLocation) {
+        Pattern pattern = Pattern.compile("/(.+?).json");
+        Matcher matcher = pattern.matcher(fileLocation);
+        matcher.find();
+        return matcher.group(1);
 
     }
 
@@ -71,9 +102,10 @@ public class Encryption {
         Cipher cipher;
         InputStream inputStream = null;
         try {
+            String ivFileName = getIVFileName(fileLocation);
 
-            cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
-            cipher.init(Cipher.DECRYPT_MODE, key);
+            cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
+            cipher.init(Cipher.DECRYPT_MODE, key, new IvParameterSpec(getIVFromFile(ivFileName)));
             inputStream = new CipherInputStream(new FileInputStream(fileLocation), cipher);
 
 
@@ -87,10 +119,28 @@ public class Encryption {
 
         } catch (InvalidKeyException e) {
             e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        } catch (InvalidAlgorithmParameterException e) {
+            e.printStackTrace();
         }
 
         return inputStream;
 
+    }
+
+    private static byte[] getIVFromFile(String ivFileName)  {
+
+        byte[] iv = new byte[16];
+        try {
+            FileInputStream findIV = new FileInputStream(ivFileName);
+            findIV.read(iv);
+            findIV.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        return iv;
     }
 
     private static byte[] getIV(byte[] secretKey) {
