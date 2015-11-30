@@ -6,6 +6,7 @@ import javax.crypto.spec.SecretKeySpec;
 import java.io.*;
 import java.security.*;
 import java.security.spec.InvalidParameterSpecException;
+import java.util.Arrays;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -43,8 +44,14 @@ public class Encryption {
     }
 
 
-
-
+    /**
+     * AES encryption using CBC mode with PKCS5Padding
+     *
+     * @param fileLocation 
+     * @param key
+     * @param iv
+     * @return
+     */
     public static OutputStream encrypt(String fileLocation, SecretKey key, byte[] iv) {
         Cipher cipher;
         OutputStream outputStream = null;
@@ -52,12 +59,6 @@ public class Encryption {
             cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
             cipher.init(Cipher.ENCRYPT_MODE, key, new IvParameterSpec(iv));
             outputStream = new CipherOutputStream(new FileOutputStream(fileLocation), cipher);
-            //System.out.println(fileLocation);
-
-            String ivFileName = getIVFileName(fileLocation);
-            //http://javapapers.com/java/java-file-encryption-decryption-using-aes-password-based-encryption-pbe/
-            //storing cbc iv in a specific folder
-            createIVFile(cipher, ivFileName);
 
         } catch (NoSuchAlgorithmException e) {
             e.printStackTrace();
@@ -69,8 +70,6 @@ public class Encryption {
             e.printStackTrace();
         } catch (IOException e) {
             e.printStackTrace();
-        } catch (InvalidParameterSpecException e) {
-            e.printStackTrace();
         } catch (InvalidAlgorithmParameterException e) {
             e.printStackTrace();
         }
@@ -79,7 +78,15 @@ public class Encryption {
 
     }
 
-    private static String getIVFileName(String fileLocation) {
+
+    /**
+     * get the iv file location based on the user's chatlog
+     * Every chatlog file has a machting iv using a structure : chat log "chatlog-alice.json" with iv "chatlog-alice.iv"
+     *
+     * @param fileLocation provide chatlogfile location
+     * @return matched iv location
+     */
+    private static String getIVFileLocation(String fileLocation) {
         String name = findUserByLog(fileLocation);
         return "log/"+name+".IV";
     }
@@ -128,11 +135,11 @@ public class Encryption {
 
     }
 
-    public static byte[] retrieveIV(String ivFileName)  {
+    public static byte[] retrieveIV(String fileLocation)  {
 
         byte[] iv = new byte[16];
         try {
-            FileInputStream findIV = new FileInputStream(ivFileName);
+            FileInputStream findIV = new FileInputStream(getIVFileLocation(fileLocation));
             findIV.read(iv);
             findIV.close();
         } catch (IOException e) {
@@ -144,12 +151,10 @@ public class Encryption {
 
     public static void storeIV(byte[] iv, String fileLocation)
     {
-        String ivFileName = getIVFileName(fileLocation);
-        FileOutputStream ivOutFile;
         try {
-            ivOutFile = new FileOutputStream(ivFileName);
-            ivOutFile.write(iv);
-            ivOutFile.close();
+            FileOutputStream writeIV = new FileOutputStream(getIVFileLocation(fileLocation));
+            writeIV.write(iv);
+            writeIV.close();
         } catch (FileNotFoundException e) {
             e.printStackTrace();
         } catch (IOException e) {

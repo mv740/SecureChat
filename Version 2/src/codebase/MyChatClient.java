@@ -266,10 +266,8 @@ class MyChatClient extends ChatClient {
                     } catch (JsonParsingException e) {
                         System.out.println("encrypted log files detected");
 
-                        byte[] iv = Encryption.generateIV();
-                        //store iv to file
-                        Encryption.storeIV(iv,this.getChatLogPath());
-                        ins = Encryption.decrypt(this.getChatLogPath(), LogKey, iv);
+
+                        ins = Encryption.decrypt(this.getChatLogPath(), LogKey, Encryption.retrieveIV(this.getChatLogPath()));
                         jsonReader = Json.createReader(ins);
                         chatlog = jsonReader.readArray();
 
@@ -336,11 +334,15 @@ class MyChatClient extends ChatClient {
 
 
         //OutputStream out = new FileOutputStream(this.getChatLogPath());
-        byte[] iv = Encryption.retrieveIV(this.getChatLogPath());
+        byte[] iv = Encryption.generateIV();
+        System.out.println("created IV "+Arrays.toString(iv));
         OutputStream out = Encryption.encrypt(this.getChatLogPath(), LogKey,iv);
         JsonWriter writer = Json.createWriter(out);
         writer.writeArray(chatlog);
         writer.close();
+
+        //store iv to file
+        Encryption.storeIV(iv,this.getChatLogPath());
 
     }
 
