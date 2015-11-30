@@ -45,12 +45,12 @@ public class Encryption {
 
 
 
-    public static OutputStream encrypt(String fileLocation, SecretKey key) {
+    public static OutputStream encrypt(String fileLocation, SecretKey key, byte[] iv) {
         Cipher cipher;
         OutputStream outputStream = null;
         try {
             cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
-            cipher.init(Cipher.ENCRYPT_MODE, key);
+            cipher.init(Cipher.ENCRYPT_MODE, key, new IvParameterSpec(iv));
             outputStream = new CipherOutputStream(new FileOutputStream(fileLocation), cipher);
             //System.out.println(fileLocation);
 
@@ -70,6 +70,8 @@ public class Encryption {
         } catch (IOException e) {
             e.printStackTrace();
         } catch (InvalidParameterSpecException e) {
+            e.printStackTrace();
+        } catch (InvalidAlgorithmParameterException e) {
             e.printStackTrace();
         }
 
@@ -98,16 +100,13 @@ public class Encryption {
 
     }
 
-    public static InputStream decrypt(String fileLocation, SecretKey key) {
+    public static InputStream decrypt(String fileLocation, SecretKey key, byte[] iv) {
         Cipher cipher;
         InputStream inputStream = null;
         try {
-            String ivFileName = getIVFileName(fileLocation);
-
             cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
-            cipher.init(Cipher.DECRYPT_MODE, key, new IvParameterSpec(getIVFromFile(ivFileName)));
+            cipher.init(Cipher.DECRYPT_MODE, key, new IvParameterSpec(iv));
             inputStream = new CipherInputStream(new FileInputStream(fileLocation), cipher);
-
 
         } catch (NoSuchAlgorithmException e) {
             e.printStackTrace();
@@ -129,7 +128,7 @@ public class Encryption {
 
     }
 
-    private static byte[] getIVFromFile(String ivFileName)  {
+    public static byte[] retrieveIV(String ivFileName)  {
 
         byte[] iv = new byte[16];
         try {
@@ -143,12 +142,31 @@ public class Encryption {
         return iv;
     }
 
-    private static byte[] getIV(byte[] secretKey) {
-        MessageDigest md = null;
-        byte[] iv = null;
+    public static void storeIV(byte[] iv, String fileLocation)
+    {
+        String ivFileName = getIVFileName(fileLocation);
+        FileOutputStream ivOutFile;
         try {
-            md = MessageDigest.getInstance("SHA1");
-            iv = md.digest(secretKey);
+            ivOutFile = new FileOutputStream(ivFileName);
+            ivOutFile.write(iv);
+            ivOutFile.close();
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+
+    }
+
+
+    public static byte[] generateIV()
+    {
+        byte[] iv = new byte[16];
+        try {
+            SecureRandom secureRandom = SecureRandom.getInstanceStrong();
+            secureRandom.nextBytes(iv);
+
         } catch (NoSuchAlgorithmException e) {
             e.printStackTrace();
         }
