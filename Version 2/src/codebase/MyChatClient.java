@@ -2,8 +2,6 @@ package codebase;
 
 import java.io.*;
 import java.security.*;
-import java.security.spec.InvalidKeySpecException;
-import java.security.spec.X509EncodedKeySpec;
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -30,25 +28,13 @@ import infrastructure.ChatClient;
  */
 class MyChatClient extends ChatClient {
 
-    private KeyPair keyPairClient = null;
     private String password = null;
     private String uid = null;
     private boolean Authenticated = false;
 
 
-    //aes key
-    private SecretKey symmetricKeyAES;
-
-    //client nonce
     private byte[] clientNonce;
-    //client hash
-    byte[] clienthash;
-
-    //security
-    //keys
-
-
-    //Logkey
+    private byte[] clienthash;
     private SecretKey LogKey;
 
 
@@ -266,8 +252,8 @@ class MyChatClient extends ChatClient {
                     } catch (JsonParsingException e) {
                         System.out.println("encrypted log files detected");
 
-
-                        ins = Encryption.decrypt(this.getChatLogPath(), LogKey, Encryption.retrieveIV(this.getChatLogPath()));
+                        byte[] iv = Encryption.retrieveIV(this.getChatLogPath());
+                        ins = Encryption.decryptStream(this.getChatLogPath(), LogKey, iv);
                         jsonReader = Json.createReader(ins);
                         chatlog = jsonReader.readArray();
 
@@ -335,8 +321,8 @@ class MyChatClient extends ChatClient {
 
         //OutputStream out = new FileOutputStream(this.getChatLogPath());
         byte[] iv = Encryption.generateIV();
-        System.out.println("created IV "+Arrays.toString(iv));
-        OutputStream out = Encryption.encrypt(this.getChatLogPath(), LogKey,iv);
+        //System.out.println("created IV "+Arrays.toString(iv));
+        OutputStream out = Encryption.encryptStream(this.getChatLogPath(), LogKey,iv);
         JsonWriter writer = Json.createWriter(out);
         writer.writeArray(chatlog);
         writer.close();

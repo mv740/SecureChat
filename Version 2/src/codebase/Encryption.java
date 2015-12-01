@@ -45,6 +45,7 @@ public class Encryption {
 
 
     /**
+     * Encrypt Stream
      * AES encryption using CBC mode with PKCS5Padding
      *
      * @param fileLocation 
@@ -52,7 +53,7 @@ public class Encryption {
      * @param iv
      * @return
      */
-    public static OutputStream encrypt(String fileLocation, SecretKey key, byte[] iv) {
+    public static OutputStream encryptStream(String fileLocation, SecretKey key, byte[] iv) {
         Cipher cipher;
         OutputStream outputStream = null;
         try {
@@ -62,15 +63,13 @@ public class Encryption {
 
         } catch (NoSuchAlgorithmException e) {
             e.printStackTrace();
+        } catch (InvalidAlgorithmParameterException e) {
+            e.printStackTrace();
         } catch (NoSuchPaddingException e) {
             e.printStackTrace();
         } catch (FileNotFoundException e) {
             e.printStackTrace();
         } catch (InvalidKeyException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
-            e.printStackTrace();
-        } catch (InvalidAlgorithmParameterException e) {
             e.printStackTrace();
         }
 
@@ -91,13 +90,6 @@ public class Encryption {
         return "log/"+name+".IV";
     }
 
-    private static void createIVFile(Cipher cipher, String ivFileName) throws InvalidParameterSpecException, IOException {
-        FileOutputStream ivOutFile = new FileOutputStream(ivFileName);
-        AlgorithmParameters params = cipher.getParameters();
-        byte[] iv = params.getParameterSpec(IvParameterSpec.class).getIV();
-        ivOutFile.write(iv);
-        ivOutFile.close();
-    }
 
     private static String findUserByLog(String fileLocation) {
         Pattern pattern = Pattern.compile("/(.+?).json");
@@ -107,7 +99,14 @@ public class Encryption {
 
     }
 
-    public static InputStream decrypt(String fileLocation, SecretKey key, byte[] iv) {
+    /**
+     * decrypt stream using AES with cbc mode
+     * @param fileLocation
+     * @param key
+     * @param iv
+     * @return
+     */
+    public static InputStream decryptStream(String fileLocation, SecretKey key, byte[] iv) {
         Cipher cipher;
         InputStream inputStream = null;
         try {
@@ -123,11 +122,9 @@ public class Encryption {
 
             System.err.println("Chatlog file could not be opened.");
 
+        }  catch (InvalidAlgorithmParameterException e) {
+            e.printStackTrace();
         } catch (InvalidKeyException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
-            e.printStackTrace();
-        } catch (InvalidAlgorithmParameterException e) {
             e.printStackTrace();
         }
 
