@@ -44,8 +44,7 @@ class MyChatServer extends ChatServer {
     private boolean[] Authenticated;
 
     //server nonce store. used to detect replay attack
-    private byte[] serverNonceA;
-    private byte[] serverNonceB;
+    private byte[][] serverNonceStore;
 
 
     //clients Public keys
@@ -58,6 +57,8 @@ class MyChatServer extends ChatServer {
     //DH- exchange
     private boolean[] SECURED_MODE;
     private SecretKey[] symmetricKeyStore;
+    //store first part of the Dh exchange public key
+    byte[][] DHpublicKeyPart1Store;
 
 
     // In Constructor, the user database is loaded.
@@ -69,13 +70,10 @@ class MyChatServer extends ChatServer {
             Authenticated = new boolean[2];
             SECURED_MODE = new boolean[2];
             symmetricKeyStore = new SecretKey[2];
-
-            //URL url = getClass().getResource("ListStopWords.txt");
-            //String workingDirectory = System.getProperty("certificate");
-            //System.out.println(workingDirectory);
-
             rsaPrivateKeyServer = Encryption.rsaLoadPrivateKey((new File("./certificate/private/server.key.pem")));
 
+            serverNonceStore = new byte[2][];
+            DHpublicKeyPart1Store = new byte[2][];
 
         } catch (FileNotFoundException e) {
             System.err.println("Database file not found!");
@@ -106,16 +104,15 @@ class MyChatServer extends ChatServer {
         //http://docs.oracle.com/javase/7/docs/technotes/guides/security/crypto/CryptoSpec.html#DH2Ex
         //http://docstore.mik.ua/orelly/java-ent/security/ch13_07.htm
 
-
         try {
             ChatPacket p = null;
 
             //accept chat message/or logout from authenticated user only
             if (Authenticated[getUser(IsA)]) {
 
-                if(SECURED_MODE[getUser(IsA)])
-                {
-                    p = Encryption.AESdecrypt(is,symmetricKeyStore[getUser(IsA)]);
+                if (SECURED_MODE[getUser(IsA)]) {
+
+                    p = Encryption.AESdecrypt(is, symmetricKeyStore[getUser(IsA)]);
 
                     if (p.request == ChatRequest.CHAT) {
                         // This is a chat message
@@ -123,7 +120,6 @@ class MyChatServer extends ChatServer {
                         // Whoever is sending it must be already logged in
                         if ((IsA && statA != "") || (!IsA && statB != "")) {
                             // Forward the original packet to the recipient
-
 
                             //receiver must be logged in to received
                             //SEND to authenticated user
@@ -142,20 +138,21 @@ class MyChatServer extends ChatServer {
                                 }
                             }
                         }
-                    }else if (p.request == ChatRequest.LOGOUT) {
+                    } else if (p.request == ChatRequest.LOGOUT) {
                         if (IsA) {
                             statA = "";
                         } else {
                             statB = "";
                         }
                         UpdateLogin(IsA, "");
-                        RespondtoClient(IsA, "LOGOUT", null);
-                        securedConnectionStop(IsA);
-
-
+                        String message = "LOGOUT";
+                        byte[] messageHash = Encryption.generateSHA256Digest(message.getBytes("UTF-8"));
+                        RespondtoClient(IsA, message, Encryption.generateSignature(messageHash, rsaPrivateKeyServer));
+                        logoutUser(IsA);
+                        
                     }
 
-                }else {
+                } else {
 
                     in = new ObjectInputStream(is);
                     Object o = in.readObject();
@@ -163,23 +160,24 @@ class MyChatServer extends ChatServer {
 
                     if (p.request == ChatRequest.DH_PUBLIC_KEY) {
 
-
-                        System.out.println("server start create public key");
-                        byte[] serverPublicKey = serverCreatePublicPairKey(IsA, p);
-
-                        //send to client
-                        ChatPacket msg = new ChatPacket();
-                        msg.request = ChatRequest.DH_PUBLIC_KEY;
-                        msg.uid = IsA ? statA : statB;
-                        msg.success = "Success";
-                        msg.data = Encryption.publicKeyEncryption(serverPublicKey, (IsA ? rsaPublicKeyAlice : rsaPublicKeyBob));
-                        //msg.signature = Encryption.generateSignature(msg.uid.getBytes("UTF-8"), rsaPrivateKeyServer);
-
-                        System.out.println("server send server public key");
-                        System.out.println("server side secured-mode activated for " + IsA);
-                        SerializeNSend(IsA, msg);
-                        SECURED_MODE[getUser(IsA)] = true;
-
+                        //The DH public key is too big too be encrypted by 256 byte RSA key therefore we have split it in two message
+                        if (DHpublicKeyPart1Store[getUser(IsA)] != null) {
+                            byte[] messageHash = Encryption.generateSHA256Digest(p.data);
+                            if (Encryption.verifySignature(p.signature, messageHash, IsA ? rsaPublicKeyAlice : rsaPublicKeyBob)) {
+                                System.out.println("server start create public key");
+                                byte[] DHpublicKey = Encryption.concatenateMessage(DHpublicKeyPart1Store[getUser(IsA)], Encryption.privateKeyDecryptionByte(p.data, rsaPrivateKeyServer));
+                                byte[] serverPublicKey = serverCreatePublicPairKey(IsA, p, DHpublicKey);
+                                sendDHPublicKeyToClientInPart(IsA, serverPublicKey);
+                                DHpublicKeyPart1Store[getUser(IsA)] = null; //remove it
+                            } else
+                                errorMITM(IsA);
+                        } else {
+                            byte[] messageHash = Encryption.generateSHA256Digest(p.data);
+                            if (Encryption.verifySignature(p.signature, messageHash, IsA ? rsaPublicKeyAlice : rsaPublicKeyBob)) {
+                                DHpublicKeyPart1Store[getUser(IsA)] = Encryption.privateKeyDecryptionByte(p.data, rsaPrivateKeyServer);
+                            } else
+                                errorMITM(IsA);
+                        }
                     }
                 }
             } else {
@@ -188,13 +186,10 @@ class MyChatServer extends ChatServer {
                 Object object = objectInput.readObject();
                 p = (ChatPacket) object;
 
-                //p = Encryption.PrivateKeyDecryption1(is, rsaPrivateKeyServer);
-
                 if (p.request == ChatRequest.Nonce) {
 
-
                     //recreate the hash of message
-                    byte[] message = Encryption.concatenateMessage(p.rsaPublicKey.getEncoded(),p.cnonce);
+                    byte[] message = Encryption.concatenateMessage(p.rsaPublicKey.getEncoded(), p.cnonce);
                     byte[] hashMessage = Encryption.generateSHA256Digest(message);
 
                     //Authentication of message, no impersonation of user
@@ -217,16 +212,15 @@ class MyChatServer extends ChatServer {
                         msg.cnonce = Encryption.privateKeyDecryptionByte(p.cnonce, rsaPrivateKeyServer);
                         msg.snonce = Encryption.publicKeyEncryption(nonceServer, (IsA ? rsaPublicKeyAlice : rsaPublicKeyBob));
 
-                        message = Encryption.concatenateMessage(msg.cnonce,msg.snonce);
+                        message = Encryption.concatenateMessage(msg.cnonce, msg.snonce);
                         hashMessage = Encryption.generateSHA256Digest(message);
 
                         msg.signature = Encryption.generateSignature(hashMessage, rsaPrivateKeyServer); //sign the client hashedMessage
                         System.out.println("send client nonce back + encrypted server nonce");
                         SerializeNSend(IsA, msg);
                     } else {
-                        System.out.println("WARNING MAN IN THE MIDDLE ATTACK");
+                        errorMITM(IsA);
                     }
-
 
                 }
                 if (p.request == ChatRequest.LOGIN) {
@@ -234,26 +228,15 @@ class MyChatServer extends ChatServer {
                     System.out.println("server received last authentication msg");
 
                     byte[] hashMessage = Encryption.generateSHA256Digest(p.snonce);
-
                     if (Encryption.verifySignature(p.signature, hashMessage, (IsA ? rsaPublicKeyAlice : rsaPublicKeyBob))) {
                         //valid signature
-                        if (IsA) {
-                            if (serverNonceA != p.snonce) {
-                                //once is unique, was never reused ... protect agains replay attack
-                                //store value for future authentication
-                                serverNonceA = p.snonce;
-                            } else {
-                                System.out.println("server nonce was already used!!! Attack detected");
-                            }
-                        } else {
-                            if (serverNonceB != p.snonce) {
-                                //once is unique, was never reused ... protect agains replay attack
-                                //store value for future authentication
-                                serverNonceB = p.snonce;
-                            } else {
-                                System.out.println("server nonce was already used!!! Attack detected");
-                            }
-                        }
+
+                        if(serverNonceStore[getUser(IsA)] !=p.snonce)
+                        {
+                            //once is unique, was never reused... protect against replay attack
+                            serverNonceStore[getUser(IsA)] = p.snonce; //store it for future authentication
+                        }else
+                            System.out.println("server detect : Replay Attack");
 
                         Authenticated[getUser(IsA)] = true;
                         // We do not allow one user to be logged in on multiple
@@ -261,7 +244,6 @@ class MyChatServer extends ChatServer {
                         if (!p.uid.equals(IsA ? statB : statA)) {
                             //not already logged in
                             if (IsA) {
-                                System.out.println("server test : uid =" + p.uid);
                                 statA = p.uid;
                             } else {
                                 statB = p.uid;
@@ -285,7 +267,8 @@ class MyChatServer extends ChatServer {
                         System.out.println("Server info : SYSTEM DENIED ACCESS");
                         String message = "access_denied";
                         //sign failure message
-                        RespondtoClient(IsA, message, Encryption.generateSignature(message.getBytes("UTF-8"), rsaPrivateKeyServer));
+                        byte[] messageHash = Encryption.generateSHA256Digest(message.getBytes("UTF-8"));
+                        RespondtoClient(IsA, message, Encryption.generateSignature(messageHash, rsaPrivateKeyServer));
                     }
                 }
             }
@@ -297,27 +280,56 @@ class MyChatServer extends ChatServer {
         }
     }
 
+    private void errorMITM(boolean IsA) {
+        System.out.println("MAN In the middle attack");
+        reset(IsA);
+
+    }
+
+    private void sendDHPublicKeyToClientInPart(boolean IsA, byte[] serverPublicKey) {
+        //split key because it is too big to be encrypted by RSA key
+        byte[] firstPart = Arrays.copyOfRange(serverPublicKey, 0, 245);
+        byte[] lastPart = Arrays.copyOfRange(serverPublicKey, 245, serverPublicKey.length);
+
+        //send to client
+        ChatPacket msg = new ChatPacket();
+        msg.request = ChatRequest.DH_PUBLIC_KEY;
+        msg.uid = IsA ? statA : statB;
+        msg.success = "Success";
+        msg.data = Encryption.publicKeyEncryption(firstPart, (IsA ? rsaPublicKeyAlice : rsaPublicKeyBob));
+        byte[] messageHash = Encryption.generateSHA256Digest(msg.data);
+        msg.signature = Encryption.generateSignature(messageHash, rsaPrivateKeyServer);
+        SerializeNSend(IsA, msg);
+        //second part
+
+        msg.data = Encryption.publicKeyEncryption(lastPart, (IsA ? rsaPublicKeyAlice : rsaPublicKeyBob));
+        messageHash = Encryption.generateSHA256Digest(msg.data);
+        msg.signature = Encryption.generateSignature(messageHash, rsaPrivateKeyServer);
+        System.out.println("server send server public key");
+        System.out.println("server side secured-mode activated for " + IsA);
+        SerializeNSend(IsA, msg);
+        SECURED_MODE[getUser(IsA)] = true;
+    }
+
     /**
      * Create public Pair Key then create the shared secret key based on parameter from client user
      *
-     *
      * @param IsA
      * @param p
+     * @param DHpublicKey
      * @return serverPublicKey
      */
-    private byte[] serverCreatePublicPairKey(boolean IsA, ChatPacket p) {
+    private byte[] serverCreatePublicPairKey(boolean IsA, ChatPacket p, byte[] DHpublicKey) {
 
-        byte[] serverPublicKey =null;
+        byte[] serverPublicKey = null;
 
         try {
 
             //get public key pair from other user
             System.out.println("Server receive client public key pair");
-            byte[] clientPublicKeyPair = Encryption.privateKeyDecryptionByte(p.data, rsaPrivateKeyServer);
-            if(clientPublicKeyPair.length ==0)
-            {
-                System.out.println("clientPublicKeyPair size error");
-            }
+            //byte[] clientPublicKeyPair = Encryption.privateKeyDecryptionByte(p.data, rsaPrivateKeyServer);
+            byte[] clientPublicKeyPair = DHpublicKey;
+
 
             //Instantiate DH public key from the encoded key material
             KeyFactory serverKeyFactory = KeyFactory.getInstance("DH");
@@ -341,15 +353,11 @@ class MyChatServer extends ChatServer {
                 //create shared secret KEY
                 serverKeyAgreement.doPhase(clientPubKey, true);
                 byte[] sharedSecret = serverKeyAgreement.generateSecret();
-                System.out.println("server sharwed key size " +sharedSecret.length);
 
                 generateSharedAESKey(IsA, sharedSecret);
 
-
                 //server encode his public key and send to client
                 serverPublicKey = serverKeyPair.getPublic().getEncoded();
-
-
 
             } catch (InvalidAlgorithmParameterException e) {
                 e.printStackTrace();
@@ -358,14 +366,12 @@ class MyChatServer extends ChatServer {
         } catch (NoSuchAlgorithmException | InvalidKeyException | InvalidKeySpecException e) {
             e.printStackTrace();
         }
-
         return serverPublicKey;
     }
 
     private void generateSharedAESKey(boolean IsA, byte[] sharedSecret) {
         //create shared AES symmetric key
         SecretKey symmetricKeyAES = Encryption.generateAESKey(sharedSecret);
-        System.out.println("TEST GET USER" + getUser(IsA));
         symmetricKeyStore[getUser(IsA)] = symmetricKeyAES;
     }
 
@@ -386,10 +392,6 @@ class MyChatServer extends ChatServer {
             //decrypt nonce send by Bob
             //clientNonceB = clientNonce;
         }
-    }
-
-    private void clientNounceReceivedLog(ChatPacket p) {
-        System.out.println("client nonce received " + Arrays.toString(p.cnonce));
     }
 
     private void refreshSenderUI(boolean IsA, ChatPacket p) {
@@ -418,9 +420,6 @@ class MyChatServer extends ChatServer {
      * (ChatPacket) and sends it to the corresponding recipient (A or B)
      */
     private void SerializeNSend(boolean IsA, ChatPacket p) {
-
-        //System.out.println("sending to user ALICE: " + IsA);
-
         ByteArrayOutputStream os = new ByteArrayOutputStream();
         ObjectOutput out = null;
         try {
@@ -429,9 +428,8 @@ class MyChatServer extends ChatServer {
             byte[] packet = os.toByteArray();
 
 
-            if(SECURED_MODE[getUser(IsA)] && Authenticated[getUser(IsA)])
-            {
-                packet = Encryption.AESencrypt(packet,symmetricKeyStore[getUser(IsA)]);
+            if (SECURED_MODE[getUser(IsA)] && Authenticated[getUser(IsA)]) {
+                packet = Encryption.AESencrypt(packet, symmetricKeyStore[getUser(IsA)]);
             }
             SendtoClient(IsA, packet);
 
@@ -467,30 +465,24 @@ class MyChatServer extends ChatServer {
         p.success = Success;
         p.signature = signature;
 
-        System.out.println("server side signature" + p.signature.length);
-
-
         SerializeNSend(IsA, p);
     }
 
 
-    private void securedConnectionStart(ChatPacket p, Boolean IsA) {
-        if (IsA) {
-            this.UpdateServerLog("server initiate secured connection with alice");
-        } else
-            this.UpdateServerLog("server initiate secured connection with Bob");
-        Authenticated[getUser(IsA)] = true;
-    }
-
-
-    private void securedConnectionStop(Boolean IsA) {
-        //System.out.println("DEACTIVATED ENCRYPTION");
+    private void logoutUser(Boolean IsA) {
+        System.out.println("Logout user :" + IsA);
         if (IsA) {
             this.UpdateServerLog("server stop authenticated connection with alice");
         } else
             this.UpdateServerLog("server stop authenticated connection with Bob");
-        Authenticated[getUser(IsA)] = false;
+        reset(IsA);
 
+    }
+
+    public void reset(boolean IsA) {
+        Authenticated[getUser(IsA)] = false;
+        SECURED_MODE[getUser(IsA)] = false;
+        symmetricKeyStore[getUser(IsA)] = null;
     }
 
 
