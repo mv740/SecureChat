@@ -23,6 +23,7 @@ public class ChatPacket implements java.io.Serializable{
 	byte[] snonce;
 	byte[] data;
 	byte[] signature;
+	byte[] iv;
 	RSAPublicKey rsaPublicKey;
 
 }

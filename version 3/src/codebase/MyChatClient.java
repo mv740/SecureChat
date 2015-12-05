@@ -1,18 +1,22 @@
 package codebase;
 
 import java.io.*;
+import java.math.BigInteger;
+import java.security.*;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.X509EncodedKeySpec;
 import java.util.Arrays;
-import java.util.Objects;
 
 import javax.crypto.*;
+import javax.crypto.interfaces.DHPublicKey;
+import javax.crypto.spec.DHParameterSpec;
 import javax.json.Json;
 import javax.json.JsonArray;
 import javax.json.JsonArrayBuilder;
 import javax.json.JsonReader;
 import javax.json.JsonWriter;
-import javax.json.stream.JsonParsingException;
 
 import infrastructure.ChatClient;
 
@@ -35,8 +39,6 @@ class MyChatClient extends ChatClient {
 
 
     private byte[] clientNonce;
-    private byte[] clienthash;
-    private SecretKey LogKey;
 
     //certificates Public/Private
     RSAPublicKey rsaPublicKey;
@@ -44,6 +46,12 @@ class MyChatClient extends ChatClient {
 
     //server publicKey
     RSAPublicKey rsaPublicKeyServer;
+
+    //Diffie–Hellman key exchange
+    private KeyPair keyPairClient = null;
+    private SecretKey symmetricKeyAES;
+    boolean SECURED_MODE;
+
 
 
     MyChatClient(boolean IsA) {
@@ -203,6 +211,15 @@ class MyChatClient extends ChatClient {
             Object o = in.readObject();
             p = (ChatPacket) o;
 
+            if(Authenticated)
+            {
+                if(p.request == ChatRequest.DH_PUBLIC_KEY)
+                {
+                    System.out.println("client receive public from server");
+                    generateSharedSecretKey(p);
+                }
+            }
+
             if (p.request == ChatRequest.Nonce) {
 
                 System.out.println("client receive server nonce from server");
@@ -254,10 +271,12 @@ class MyChatClient extends ChatClient {
                     //we are talking to the server
                     Authenticated = true;
 
+                    //todo load chat and refresh after DH exchange success
                     loadChat();
                     RefreshList();
 
-                    //start DH exchange process 
+                    //start DH exchange process
+                    startKeyPair(curUser);
 
 
                 } else {
@@ -289,6 +308,34 @@ class MyChatClient extends ChatClient {
             e.printStackTrace();
         }
 
+    }
+
+    private void generateSharedSecretKey(ChatPacket p) {
+        try {
+
+            //client private key
+            KeyAgreement keyAgreement = KeyAgreement.getInstance("DH");
+            keyAgreement.init(keyPairClient.getPrivate());
+
+            //server public key
+            KeyFactory keyFactory = KeyFactory.getInstance("DH");
+            byte[] serverPublicKey = Encryption.privateKeyDecryptionByte(p.data,rsaPrivateKey);
+
+            X509EncodedKeySpec x509EncodedKeySpec = new X509EncodedKeySpec(serverPublicKey);
+            PublicKey publicKey = keyFactory.generatePublic(x509EncodedKeySpec);
+            keyAgreement.doPhase(publicKey, true);
+
+            //create shared AES symmetric key
+            byte sharedSecret[] = keyAgreement.generateSecret();
+            System.out.println("client shared key size" +sharedSecret.length);
+            symmetricKeyAES = Encryption.generateAESKey(sharedSecret);
+
+            SECURED_MODE = true;
+
+
+        } catch (NoSuchAlgorithmException | InvalidKeyException | InvalidKeySpecException e) {
+            e.printStackTrace();
+        }
     }
 
     private void loadChat() {
@@ -363,6 +410,11 @@ class MyChatClient extends ChatClient {
             out.writeObject(p);
             byte[] packet = os.toByteArray();
 
+            if(Authenticated && SECURED_MODE)
+            {
+                packet = Encryption.AESencrypt(packet,symmetricKeyAES);
+            }
+
             SendtoServer(packet);
         } catch (IOException e) {
             e.printStackTrace();
@@ -406,37 +458,43 @@ class MyChatClient extends ChatClient {
 
     }
 
-
     /**
-     * Enable to execute shell command from java
-     * <p>
-     * //http://www.mkyong.com/java/how-to-execute-shell-command-from-java/
+     * Generate client key pair
+     * send
      *
-     * @param command shell command
-     * @return output of your command
+     * @param uid
      */
-    private String executeCommand(String command) {
-
-        StringBuffer output = new StringBuffer();
-
-        java.lang.Process p;
+    //Diffie-Hellman key agreement
+    public void startKeyPair(String uid) {
         try {
-            p = Runtime.getRuntime().exec(command);
-            p.waitFor();
-            BufferedReader reader =
-                    new BufferedReader(new InputStreamReader(p.getInputStream()));
+            KeyPairGenerator kpg = KeyPairGenerator.getInstance("DH");
+            kpg.initialize(512); //todo 1024 bit ...  now with 512 it create a 227 byte
 
-            String line = "";
-            while ((line = reader.readLine()) != null) {
-                output.append(line); //removed the "\n"
-            }
+            keyPairClient = kpg.generateKeyPair();
+            DHParameterSpec dhSpec = ((DHPublicKey) keyPairClient.getPublic()).getParams();
+            BigInteger clientG = dhSpec.getG();
+            BigInteger clientP = dhSpec.getP();
+            int clientL = dhSpec.getL();
 
-        } catch (Exception e) {
+            System.out.println(keyPairClient.getPublic().getEncoded().length);
+            System.out.println(keyPairClient.getPrivate().getEncoded().length);
+            byte[] clientPublicKeyPair = keyPairClient.getPublic().getEncoded();
+
+            System.out.println("client public key size DH => " +clientPublicKeyPair.length);
+            System.out.println("client public key size DH => " + Arrays.toString(keyPairClient.getPublic().getEncoded()));
+
+            //send public key to server
+            ChatPacket newMSG = new ChatPacket();
+            newMSG.request = ChatRequest.DH_PUBLIC_KEY;
+            newMSG.uid = uid;
+            newMSG.data = Encryption.publicKeyEncryption(clientPublicKeyPair,rsaPublicKeyServer);
+            //newMSG.signature = Encryption.generateSignature(uid.getBytes("UTF-8"),rsaPrivateKey);
+            System.out.println("client send public key");
+            SerializeNSend(newMSG);
+
+        } catch (NoSuchAlgorithmException e) {
             e.printStackTrace();
         }
-
-        return output.toString();
-
     }
 
 

@@ -23,7 +23,7 @@ import java.util.regex.Pattern;
 public class Encryption {
 
 
-    public static SecretKey generateKey(byte[] sharedSecret) {
+    public static SecretKey generateAESKey(byte[] sharedSecret) {
         MessageDigest md;
         SecretKey aesKey = null;
         try {
@@ -306,6 +306,61 @@ public class Encryption {
 
     }
 
+    public static byte[] AESencrypt(byte[] plaintext, SecretKey symmetricKeyAES) {
+        //System.out.println("ciphermaxlength: "+ Cipher.getMaxAllowedKeyLength("AES/ECB/PKCS5Padding"));
+        Cipher cipher;
+        byte[] encrypted = null;
+        try {
+            cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
+            cipher.init(Cipher.ENCRYPT_MODE, symmetricKeyAES);
+            encrypted = cipher.doFinal(plaintext);
+
+
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        } catch (NoSuchPaddingException e) {
+            e.printStackTrace();
+        } catch (BadPaddingException e) {
+            e.printStackTrace();
+        } catch (IllegalBlockSizeException e) {
+            e.printStackTrace();
+        } catch (InvalidKeyException e) {
+            e.printStackTrace();
+        }
+        return encrypted;
+    }
+
+    public static ChatPacket AESdecrypt(ByteArrayInputStream byteArrayInputStream, SecretKey symmetricKeyAES) {
+        Cipher cipher;
+        ChatPacket chatPacket = null;
+        try {
+            cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
+            cipher.init(Cipher.DECRYPT_MODE, symmetricKeyAES);
+            CipherInputStream cis = new CipherInputStream(byteArrayInputStream, cipher);
+
+
+            ObjectInput objectInput = new ObjectInputStream(cis);
+            Object object = objectInput.readObject();
+            chatPacket = (ChatPacket) object;
+
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        } catch (NoSuchPaddingException e) {
+            e.printStackTrace();
+        } catch (InvalidKeyException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        } catch (ClassNotFoundException e) {
+            e.printStackTrace();
+        }
+
+        return chatPacket;
+
+    }
+
+
+
     /**
      * decrypt stream using AES with cbc mode
      * @param fileLocation
@@ -339,34 +394,6 @@ public class Encryption {
 
     }
 
-    public static byte[] retrieveIV(String fileLocation)  {
-
-        byte[] iv = new byte[16];
-        try {
-            FileInputStream findIV = new FileInputStream(getIVFileLocation(fileLocation));
-            findIV.read(iv);
-            findIV.close();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-
-        return iv;
-    }
-
-    public static void storeIV(byte[] iv, String fileLocation)
-    {
-        try {
-            FileOutputStream writeIV = new FileOutputStream(getIVFileLocation(fileLocation));
-            writeIV.write(iv);
-            writeIV.close();
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-
-
-    }
 
 
     public static byte[] generateIV()
