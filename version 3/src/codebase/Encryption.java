@@ -450,4 +450,44 @@ public class Encryption {
     }
 
 
+    public static byte[] generateSHA256Digest(byte[] message)
+    {
+        byte[] hashedMessage = null;
+        try {
+            MessageDigest messageDigest = MessageDigest.getInstance("SHA-256");
+            messageDigest.update(message);
+            hashedMessage = messageDigest.digest();
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        }
+        return  hashedMessage;
+    }
+
+    /**
+     * Concatenate two byte[] messages into one
+     *
+     * @param message1
+     * @param message2
+     * @return
+     */
+    public static byte[] concatenateMessage(byte[] message1, byte[] message2)
+    {
+        byte[] result = null;
+
+        //http://stackoverflow.com/questions/5513152/easy-way-to-concatenate-two-byte-arrays
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        try {
+            outputStream.write(message1);
+            outputStream.write(message2);
+
+            result = outputStream.toByteArray();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        return result;
+
+    }
+
+
 }

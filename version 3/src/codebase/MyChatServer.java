@@ -176,9 +176,9 @@ class MyChatServer extends ChatServer {
                         //msg.signature = Encryption.generateSignature(msg.uid.getBytes("UTF-8"), rsaPrivateKeyServer);
 
                         System.out.println("server send server public key");
-                        SECURED_MODE[getUser(IsA)] = true;
                         System.out.println("server side secured-mode activated for " + IsA);
                         SerializeNSend(IsA, msg);
+                        SECURED_MODE[getUser(IsA)] = true;
 
                     }
                 }
@@ -193,8 +193,12 @@ class MyChatServer extends ChatServer {
                 if (p.request == ChatRequest.Nonce) {
 
 
+                    //recreate the hash of message
+                    byte[] message = Encryption.concatenateMessage(p.rsaPublicKey.getEncoded(),p.cnonce);
+                    byte[] hashMessage = Encryption.generateSHA256Digest(message);
+
                     //Authentication of message, no impersonation of user
-                    if (Encryption.verifySignature(p.signature, p.rsaPublicKey.getEncoded(), p.rsaPublicKey)) {
+                    if (Encryption.verifySignature(p.signature, hashMessage, p.rsaPublicKey)) {
 
                         System.out.println("VALID SIGNATURE");
                         //signature is valid, it is that user
@@ -212,7 +216,11 @@ class MyChatServer extends ChatServer {
                         //msg.cnonce = IsA ? clientNonceA : clientNonceB;
                         msg.cnonce = Encryption.privateKeyDecryptionByte(p.cnonce, rsaPrivateKeyServer);
                         msg.snonce = Encryption.publicKeyEncryption(nonceServer, (IsA ? rsaPublicKeyAlice : rsaPublicKeyBob));
-                        msg.signature = Encryption.generateSignature(msg.cnonce, rsaPrivateKeyServer); //sign the client nonce
+
+                        message = Encryption.concatenateMessage(msg.cnonce,msg.snonce);
+                        hashMessage = Encryption.generateSHA256Digest(message);
+
+                        msg.signature = Encryption.generateSignature(hashMessage, rsaPrivateKeyServer); //sign the client hashedMessage
                         System.out.println("send client nonce back + encrypted server nonce");
                         SerializeNSend(IsA, msg);
                     } else {
@@ -224,7 +232,10 @@ class MyChatServer extends ChatServer {
                 if (p.request == ChatRequest.LOGIN) {
 
                     System.out.println("server received last authentication msg");
-                    if (Encryption.verifySignature(p.signature, p.snonce, (IsA ? rsaPublicKeyAlice : rsaPublicKeyBob))) {
+
+                    byte[] hashMessage = Encryption.generateSHA256Digest(p.snonce);
+
+                    if (Encryption.verifySignature(p.signature, hashMessage, (IsA ? rsaPublicKeyAlice : rsaPublicKeyBob))) {
                         //valid signature
                         if (IsA) {
                             if (serverNonceA != p.snonce) {
@@ -263,7 +274,8 @@ class MyChatServer extends ChatServer {
                             System.out.println("server sucessful login");
                             String message = "LOGIN";
                             //sign successful login
-                            RespondtoClient(IsA, message, Encryption.generateSignature(message.getBytes("UTF-8"), rsaPrivateKeyServer));
+                            hashMessage = Encryption.generateSHA256Digest(message.getBytes("UTF-8"));
+                            RespondtoClient(IsA, message, Encryption.generateSignature(hashMessage, rsaPrivateKeyServer));
                         }
                     }
 
@@ -416,10 +428,11 @@ class MyChatServer extends ChatServer {
             out.writeObject(p);
             byte[] packet = os.toByteArray();
 
-            //System.out.println("server send packet size b4 encrypt: " + packet.length);
-            //if alice, use her public key if not user bob's public key
-            //packet = Encryption.publicKeyEncryption(packet, IsA ? rsaPublicKeyAlice : rsaPublicKeyBob);
 
+            if(SECURED_MODE[getUser(IsA)] && Authenticated[getUser(IsA)])
+            {
+                packet = Encryption.AESencrypt(packet,symmetricKeyStore[getUser(IsA)]);
+            }
             SendtoClient(IsA, packet);
 
 

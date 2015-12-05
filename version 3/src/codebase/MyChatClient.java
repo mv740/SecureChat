@@ -33,7 +33,6 @@ import infrastructure.ChatClient;
  */
 class MyChatClient extends ChatClient {
 
-    private String password = null;
     private String uid = null;
     private boolean Authenticated = false;
 
@@ -83,16 +82,11 @@ class MyChatClient extends ChatClient {
      * Someone clicks on the "Login" button
      */
     public void LoginRequestReceived(String uid, String pwd) {
-        ChatPacket p = new ChatPacket();
-        p.request = ChatRequest.LOGIN;
-        p.uid = uid;
-
         if (!Authenticated) {
             this.uid = uid;
             System.out.println("client ask for server nonce");
             getNonce(uid);
-        } else
-            SerializeNSend(p);
+        }
     }
 
 
@@ -104,10 +98,15 @@ class MyChatClient extends ChatClient {
 
         p.rsaPublicKey = rsaPublicKey; //send her public key to server
         p.cnonce = Encryption.publicKeyEncryption(Encryption.generateNonce(), rsaPublicKeyServer); //create client nonce and encrypt it
-        p.signature = Encryption.generateSignature((p.rsaPublicKey).getEncoded(), rsaPrivateKey); //we prove that we are the one sending this message
+        byte[] message = Encryption.concatenateMessage(rsaPublicKey.getEncoded(),p.cnonce);
+        byte[] messageHash = Encryption.generateSHA256Digest(message);
+        p.signature = Encryption.generateSignature(messageHash, rsaPrivateKey); //we prove that we are the one sending this message by signing the hash of the msg
 
         SerializeNSend(p);
     }
+
+
+
 
 
     /**
@@ -207,11 +206,16 @@ class MyChatClient extends ChatClient {
         try {
 
 
-            in = new ObjectInputStream(is);
-            Object o = in.readObject();
-            p = (ChatPacket) o;
+            if(Authenticated && SECURED_MODE)
+            {
+                p = Encryption.AESdecrypt(is,symmetricKeyAES);
+            }else {
+                in = new ObjectInputStream(is);
+                Object o = in.readObject();
+                p = (ChatPacket) o;
+            }
 
-            if(Authenticated)
+            if(Authenticated && !SECURED_MODE)
             {
                 if(p.request == ChatRequest.DH_PUBLIC_KEY)
                 {
@@ -224,8 +228,11 @@ class MyChatClient extends ChatClient {
 
                 System.out.println("client receive server nonce from server");
 
+                byte[] message = Encryption.concatenateMessage(p.cnonce,p.snonce);
+                byte[] hashMessage = Encryption.generateSHA256Digest(message);
+
                 //verify that we are receiving from the real server
-                if (Encryption.verifySignature(p.signature, p.cnonce, rsaPublicKeyServer)) {
+                if (Encryption.verifySignature(p.signature, hashMessage, rsaPublicKeyServer)) {
 
                     if (clientNonce != p.cnonce) {
                         //store it to check for future  authentication
@@ -234,15 +241,20 @@ class MyChatClient extends ChatClient {
                         // passed nonce challenge,
 
 
+
+
                         //server still need to authenticate us
-                        ChatPacket loginMsg = new ChatPacket();
+                        ChatPacket msg = new ChatPacket();
                         System.out.println("client send back the server nonce");
-                        loginMsg.request = ChatRequest.LOGIN;
-                        loginMsg.uid = this.uid;
+                        msg.request = ChatRequest.LOGIN;
+                        msg.uid = this.uid;
                         System.out.println("client uid: " + this.uid);
-                        loginMsg.snonce = Encryption.privateKeyDecryptionByte(p.snonce, rsaPrivateKey);
-                        loginMsg.signature = Encryption.generateSignature(loginMsg.snonce, rsaPrivateKey); //sign bob's challenge
-                        SerializeNSend(loginMsg);
+                        msg.snonce = Encryption.privateKeyDecryptionByte(p.snonce, rsaPrivateKey);
+
+                        hashMessage = Encryption.generateSHA256Digest(msg.snonce);
+
+                        msg.signature = Encryption.generateSignature(hashMessage, rsaPrivateKey); //sign bob's hashed challenge
+                        SerializeNSend(msg);
 
                     } else {
                         //this is a second time this system has seen this client nonce
@@ -254,8 +266,7 @@ class MyChatClient extends ChatClient {
                     System.out.println("Client side : WARNING MAN IN THE MIDDLE ATTACK");
 
                 }
-
-
+                
             }
             if (p.request == ChatRequest.RESPONSE && p.success.equals("access_denied")) {
                 //System.out.println("ERROR LOGIN account client");
@@ -263,7 +274,10 @@ class MyChatClient extends ChatClient {
                 Authenticated = false;
             } else if (p.request == ChatRequest.RESPONSE && p.success.equals("LOGIN")) {
 
-                if (Encryption.verifySignature(p.signature,p.success.getBytes("UTF-8") ,rsaPublicKeyServer)) {
+
+                byte[] hashMessage = Encryption.generateSHA256Digest(p.success.getBytes("UTF-8") );
+
+                if (Encryption.verifySignature(p.signature,hashMessage ,rsaPublicKeyServer)) {
 
                     // This indicates a successful login
                     curUser = p.uid;
