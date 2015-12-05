@@ -11,5 +11,6 @@ public enum ChatRequest {
     RESPONSE,
     CHAT_ACK,
     DH_PUBLIC_KEY,
-    Nonce
+    Nonce,
+    IV
 }

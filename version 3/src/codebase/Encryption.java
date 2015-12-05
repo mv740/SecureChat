@@ -10,10 +10,7 @@ import java.security.*;
 import java.security.cert.*;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
-import java.security.spec.InvalidParameterSpecException;
 import java.security.spec.PKCS8EncodedKeySpec;
-import java.util.Arrays;
-import java.util.Base64;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -195,34 +192,6 @@ public class Encryption {
         return plainText;
     }
 
-    public static ChatPacket PrivateKeyDecryption1(ByteArrayInputStream byteArrayInputStream, RSAPrivateKey rsaPrivateKey)
-    {
-        Cipher cipher;
-        ChatPacket chatPacket = null;
-        try {
-            System.out.println("key"+rsaPrivateKey.getModulus().bitLength());
-            cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
-            cipher.init(Cipher.DECRYPT_MODE, rsaPrivateKey);
-            CipherInputStream cis = new CipherInputStream(byteArrayInputStream, cipher);
-            //plainText = cipher.doFinal(cipherText);
-
-            ObjectInput objectInput = new ObjectInputStream(cis);
-            Object object = objectInput.readObject();
-            chatPacket = (ChatPacket) object;
-
-        } catch (NoSuchAlgorithmException e) {
-            e.printStackTrace();
-        } catch (NoSuchPaddingException e) {
-            e.printStackTrace();
-        } catch (InvalidKeyException e) {
-            e.printStackTrace();
-        } catch (ClassNotFoundException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        return chatPacket;
-    }
 
     public static byte[] PrivateKeyDecryptionPacket(byte[] data, RSAPrivateKey rsaPrivateKey)
     {
@@ -306,13 +275,13 @@ public class Encryption {
 
     }
 
-    public static byte[] AESencrypt(byte[] plaintext, SecretKey symmetricKeyAES) {
+    public static byte[] AESencrypt(byte[] plaintext, SecretKey symmetricKeyAES, byte[] iv) {
         //System.out.println("ciphermaxlength: "+ Cipher.getMaxAllowedKeyLength("AES/ECB/PKCS5Padding"));
         Cipher cipher;
         byte[] encrypted = null;
         try {
-            cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
-            cipher.init(Cipher.ENCRYPT_MODE, symmetricKeyAES);
+            cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
+            cipher.init(Cipher.ENCRYPT_MODE, symmetricKeyAES,new IvParameterSpec(iv));
             encrypted = cipher.doFinal(plaintext);
 
 
@@ -326,16 +295,18 @@ public class Encryption {
             e.printStackTrace();
         } catch (InvalidKeyException e) {
             e.printStackTrace();
+        } catch (InvalidAlgorithmParameterException e) {
+            e.printStackTrace();
         }
         return encrypted;
     }
 
-    public static ChatPacket AESdecrypt(ByteArrayInputStream byteArrayInputStream, SecretKey symmetricKeyAES) {
+    public static ChatPacket AESdecrypt(ByteArrayInputStream byteArrayInputStream, SecretKey symmetricKeyAES, byte[] iv) {
         Cipher cipher;
         ChatPacket chatPacket = null;
         try {
-            cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
-            cipher.init(Cipher.DECRYPT_MODE, symmetricKeyAES);
+            cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
+            cipher.init(Cipher.DECRYPT_MODE, symmetricKeyAES, new IvParameterSpec(iv));
             CipherInputStream cis = new CipherInputStream(byteArrayInputStream, cipher);
 
 
@@ -352,6 +323,8 @@ public class Encryption {
         } catch (IOException e) {
             e.printStackTrace();
         } catch (ClassNotFoundException e) {
+            e.printStackTrace();
+        } catch (InvalidAlgorithmParameterException e) {
             e.printStackTrace();
         }
 

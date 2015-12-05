@@ -1,7 +1,6 @@
 package codebase;
 
 import java.io.*;
-import java.math.BigInteger;
 import java.security.*;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
@@ -10,8 +9,6 @@ import java.security.spec.X509EncodedKeySpec;
 import java.util.Arrays;
 
 import javax.crypto.*;
-import javax.crypto.interfaces.DHPublicKey;
-import javax.crypto.spec.DHParameterSpec;
 import javax.json.Json;
 import javax.json.JsonArray;
 import javax.json.JsonArrayBuilder;
@@ -52,6 +49,9 @@ class MyChatClient extends ChatClient {
     boolean SECURED_MODE;
 
     byte[] firstPartOFpublicKeyDH;
+    byte[] ivStore;
+    byte[] sendIV;
+    boolean gotIV =false;
 
     MyChatClient(boolean IsA) {
 
@@ -166,6 +166,15 @@ class MyChatClient extends ChatClient {
         p.uid = curUser;
         p.data = message;
         if (Authenticated) {
+
+            ChatPacket ivMessage = new ChatPacket();
+            ivMessage.request = ChatRequest.IV;
+            sendIV = Encryption.generateIV();
+            ivMessage.data = sendIV;
+            System.out.println("client: "+uid +" send iv to server");
+            SerializeNSend(ivMessage);
+
+            System.out.println("client: "+uid+ "send message to server");
             SerializeNSend(p);
         }
 
@@ -208,7 +217,38 @@ class MyChatClient extends ChatClient {
 
             if(Authenticated && SECURED_MODE)
             {
-                p = Encryption.AESdecrypt(is,symmetricKeyAES);
+                if(gotIV)
+                {
+                    p = Encryption.AESdecrypt(is, symmetricKeyAES, ivStore);
+                    gotIV=false; //used iv so reset
+                    ivStore=null;
+                    System.out.println("client:"+uid+" Used IV ");
+                }else
+                {
+                    in = new ObjectInputStream(is);
+                    Object o = in.readObject();
+                    p = (ChatPacket) o;
+
+                    if(p.request == ChatRequest.IV)
+                    {
+                        ivStore= p.data;
+                        gotIV = true; //got iv
+                        System.out.println("client :"+uid +" received Iv from server");
+                    }else {
+                        System.out.println("we got something else :" +p.request);
+                    }
+
+                }
+
+                if (p.request == ChatRequest.CHAT && !curUser.equals("")) {
+                    // A new chat message received
+                    Add1Message(p.uid, curUser, p.data);
+                } else if (p.request == ChatRequest.CHAT_ACK && !curUser.equals("")) {
+                    // This was sent by us and now it's confirmed by the server, add
+                    // it to chat history
+                    Add1Message(curUser, p.uid, p.data);
+                }
+
             }else {
                 in = new ObjectInputStream(is);
                 Object o = in.readObject();
@@ -320,13 +360,6 @@ class MyChatClient extends ChatClient {
                     reset();
                 }
 
-            } else if (p.request == ChatRequest.CHAT && !curUser.equals("")) {
-                // A new chat message received
-                Add1Message(p.uid, curUser, p.data);
-            } else if (p.request == ChatRequest.CHAT_ACK && !curUser.equals("")) {
-                // This was sent by us and now it's confirmed by the server, add
-                // it to chat history
-                Add1Message(curUser, p.uid, p.data);
             }
 
 
@@ -448,9 +481,9 @@ class MyChatClient extends ChatClient {
             out.writeObject(p);
             byte[] packet = os.toByteArray();
 
-            if(Authenticated && SECURED_MODE)
+            if(Authenticated && SECURED_MODE && p.request !=ChatRequest.IV)
             {
-                packet = Encryption.AESencrypt(packet,symmetricKeyAES);
+                packet = Encryption.AESencrypt(packet,symmetricKeyAES, sendIV);
             }
 
             SendtoServer(packet);
