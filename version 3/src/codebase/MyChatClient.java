@@ -1,12 +1,8 @@
 package codebase;
 
 import java.io.*;
-import java.security.*;
-import java.security.cert.*;
-import java.security.cert.Certificate;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
-import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -18,9 +14,7 @@ import javax.json.JsonReader;
 import javax.json.JsonWriter;
 import javax.json.stream.JsonParsingException;
 
-import com.sun.xml.internal.ws.api.message.Packet;
 import infrastructure.ChatClient;
-import org.apache.commons.ssl.PKCS8Key;
 
 /**
  * ChatClient implements the fundamental communication capabilities for your
@@ -94,29 +88,15 @@ class MyChatClient extends ChatClient {
     }
 
 
+    //ask a nonce from the server
     public void getNonce(String uid) {
         ChatPacket p = new ChatPacket();
         p.request = ChatRequest.Nonce;
         p.uid = uid;
 
-        try {
-
-            p.signature = Encryption.generateSignature((p.uid).getBytes("UTF-8"),rsaPrivateKey); //sign uid
-
-            //System.out.println("signature size "+p.signature.length);
-        } catch (UnsupportedEncodingException e) {
-            e.printStackTrace();
-        }
-
-//        byte[] encrypted=null;
-//        try {
-//            encrypted = Encryption.PublicKeyEncryption(s.getBytes("UTF-8"), rsaPublicKeyServer);
-//        } catch (UnsupportedEncodingException e) {
-//            e.printStackTrace();
-//        }
-//
-//        System.out.println("TESTING :"+Arrays.toString(encrypted));
-//        p.testing = encrypted;
+        p.rsaPublicKey = rsaPublicKey; //send her public key to server
+        p.cnonce = Encryption.publicKeyEncryption(Encryption.generateNonce(), rsaPublicKeyServer); //create client nonce and encrypt it
+        p.signature = Encryption.generateSignature((p.rsaPublicKey).getEncoded(), rsaPrivateKey); //we prove that we are the one sending this message
 
         SerializeNSend(p);
     }
@@ -178,8 +158,7 @@ class MyChatClient extends ChatClient {
         p.request = ChatRequest.CHAT;
         p.uid = curUser;
         p.data = message;
-        if(Authenticated)
-        {
+        if (Authenticated) {
             SerializeNSend(p);
         }
 
@@ -226,24 +205,38 @@ class MyChatClient extends ChatClient {
 
             if (p.request == ChatRequest.Nonce) {
 
-                System.out.println("client receive nonce from server");
+                System.out.println("client receive server nonce from server");
 
-                clientNonce = Encryption.generateNonce();
-                byte[] serverNonce = p.data;
-                //hash(cnonce+nonce+password
-                System.out.println("server once received:" + Arrays.toString(p.data));
-                clienthash = Encryption.generateHash(clientNonce, serverNonce, password);
+                //verify that we are receiving from the real server
+                if (Encryption.verifySignature(p.signature, p.cnonce, rsaPublicKeyServer)) {
 
-                //try to authenticated
-                ChatPacket loginMsg = new ChatPacket();
-                System.out.println("client nonce send "+clientNonce.length);
-                loginMsg.request = ChatRequest.LOGIN;
-                loginMsg.uid = this.uid;
-                loginMsg.data = clienthash;
-                loginMsg.cnonce = clientNonce;
-                System.out.println("client nonce +" +Arrays.toString(clientNonce));
-                System.out.println("client send hashed password+cnonce+nonce");
-                SerializeNSend(loginMsg);
+                    if (clientNonce != p.cnonce) {
+                        //store it to check for future  authentication
+                        clientNonce = p.cnonce;
+                        //client nonce can never be reused
+                        // passed nonce challenge,
+
+
+                        //server still need to authenticate us
+                        ChatPacket loginMsg = new ChatPacket();
+                        System.out.println("client send back the server nonce");
+                        loginMsg.request = ChatRequest.LOGIN;
+                        loginMsg.uid = this.uid;
+                        System.out.println("client uid: " + this.uid);
+                        loginMsg.snonce = Encryption.privateKeyDecryptionByte(p.snonce, rsaPrivateKey);
+                        loginMsg.signature = Encryption.generateSignature(loginMsg.snonce, rsaPrivateKey); //sign bob's challenge
+                        SerializeNSend(loginMsg);
+
+                    } else {
+                        //this is a second time this system has seen this client nonce
+                        System.out.println("client side : WARNING REPLAY ATTACK!!");
+
+                    }
+
+                } else {
+                    System.out.println("Client side : WARNING MAN IN THE MIDDLE ATTACK");
+
+                }
 
 
             }
@@ -252,67 +245,34 @@ class MyChatClient extends ChatClient {
                 reset();
                 Authenticated = false;
             } else if (p.request == ChatRequest.RESPONSE && p.success.equals("LOGIN")) {
-                // This indicates a successful login
-                curUser = p.uid;
 
-                if (Objects.equals(Arrays.toString(clienthash), Arrays.toString(p.data))) {
+                if (Encryption.verifySignature(p.signature,p.success.getBytes("UTF-8") ,rsaPublicKeyServer)) {
+
+                    // This indicates a successful login
+                    curUser = p.uid;
                     // This indicates a successful login and no man in the middle attack
                     //we are talking to the server
                     Authenticated = true;
-                }
-                else
-                {
-                    System.out.println("we got are talking to somebuddy else");
+
+                    loadChat();
+                    RefreshList();
+
+                    //start DH exchange process 
+
+
+                } else {
+                    System.out.println("DANGER : we got are talking to somebuddy else");
                     Authenticated = false;
 
                 }
 
-                // Time to load the chatlog
-                InputStream ins = null;
-                JsonReader jsonReader;
-                File f = new File(this.getChatLogPath());
-                if (f.exists() && !f.isDirectory()) {
 
-                    // log file are encrypted using a unique identifer created from local user's hard disk serial number
-                    // to decrypt it, you will need you physically own  the hard disk
-                    //http://superuser.com/questions/498083/how-to-get-hard-drive-serial-number-from-command-line
-                    String uniqueHostIdentifier = getDiskSerialNumber();
-                    LogKey = Encryption.generateKey(uniqueHostIdentifier.getBytes("UTF-8"));
-
-
-                    //ins = new FileInputStream(this.getChatLogPath());
-                    try {
-                        //first time program is run, log is still not encrypted
-                        ins = new FileInputStream(this.getChatLogPath());
-                        jsonReader = Json.createReader(ins);
-                        chatlog = jsonReader.readArray();
-                    } catch (JsonParsingException e) {
-                        System.out.println("encrypted log files detected");
-
-                        byte[] iv = Encryption.retrieveIV(this.getChatLogPath());
-                        ins = Encryption.decryptStream(this.getChatLogPath(), LogKey, iv);
-                        jsonReader = Json.createReader(ins);
-                        chatlog = jsonReader.readArray();
-
-                    }
-
-                } else {
-                    try {
-                        f.createNewFile();
-                        ins = new FileInputStream(this.getChatLogPath());
-                        chatlog = Json.createArrayBuilder().build();
-                    } catch (IOException e) {
-                        System.err.println("Chatlog file could not be created or opened.");
-                    }
-                }
-
-                RefreshList();
 
             } else if (p.request == ChatRequest.RESPONSE && p.success.equals("LOGOUT")) {
                 // Logged out, save chat log and clear messages on the UI
                 SaveChatHistory();
                 reset();
-                Authenticated =false;
+                Authenticated = false;
             } else if (p.request == ChatRequest.CHAT && !curUser.equals("")) {
                 // A new chat message received
                 Add1Message(p.uid, curUser, p.data);
@@ -323,14 +283,39 @@ class MyChatClient extends ChatClient {
             }
 
 
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
+        }  catch (IOException e) {
             e.printStackTrace();
         } catch (ClassNotFoundException e) {
             e.printStackTrace();
         }
 
+    }
+
+    private void loadChat() {
+        // Time to load the chatlog
+        InputStream ins = null;
+        JsonReader jsonReader;
+        File f = new File(this.getChatLogPath());
+        if (f.exists() && !f.isDirectory()) {
+
+            //load chat
+            try {
+                ins = new FileInputStream(this.getChatLogPath());
+            } catch (FileNotFoundException e) {
+                e.printStackTrace();
+            }
+            jsonReader = Json.createReader(ins);
+            chatlog = jsonReader.readArray();
+
+        } else {
+            try {
+                f.createNewFile();
+                ins = new FileInputStream(this.getChatLogPath());
+                chatlog = Json.createArrayBuilder().build();
+            } catch (IOException e) {
+                System.err.println("Chatlog file could not be created or opened.");
+            }
+        }
     }
 
 
@@ -352,23 +337,19 @@ class MyChatClient extends ChatClient {
     public void SaveChatHistory() {
         if (curUser.equals(""))
             return;
-        // The chatlog file is named after both the client and the user
-        // logged in
+        try {
+            // The chatlog file is named after both the client and the user
+            // logged in
 
-
-        //OutputStream out = new FileOutputStream(this.getChatLogPath());
-        byte[] iv = Encryption.generateIV();
-        //System.out.println("created IV "+Arrays.toString(iv));
-        OutputStream out = Encryption.encryptStream(this.getChatLogPath(), LogKey,iv);
-        JsonWriter writer = Json.createWriter(out);
-        writer.writeArray(chatlog);
-        writer.close();
-
-        //store iv to file
-        Encryption.storeIV(iv,this.getChatLogPath());
+            OutputStream out = new FileOutputStream(this.getChatLogPath());
+            JsonWriter writer = Json.createWriter(out);
+            writer.writeArray(chatlog);
+            writer.close();
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        }
 
     }
-
     /**
      * Similar to the one in MyChatServer, serializes and send the Java object
      *
@@ -381,18 +362,7 @@ class MyChatClient extends ChatClient {
             out = new ObjectOutputStream(os);
             out.writeObject(p);
             byte[] packet = os.toByteArray();
-            //SendtoServer(packet);
 
-            System.out.println("packet size "+packet.length);
-            //byte[] tosend = Encryption.PublicKeyEncryption(packet, rsaPublicKeyServer);
-
-            //System.out.println("1-ENCRYPTED =>"+Arrays.toString(tosend));
-            //RSAPrivateKey rsaPrivateKeyServer = Encryption.rsaLoadPrivateKey((new File("./certificate/private/server.key.pem")));
-            //byte[] test = Encryption.PublicKeyDecryption(packet,rsaPrivateKeyServer);
-            //System.out.println(""+Arrays.toString(test));
-
-            //System.out.println("packet size : "+packet.length);
-            //System.out.println(tosend.length);
             SendtoServer(packet);
         } catch (IOException e) {
             e.printStackTrace();
@@ -469,22 +439,7 @@ class MyChatClient extends ChatClient {
 
     }
 
-    /**
-     * get the local user's hard disk serial number!
-     * This is unique because there can't be two hard disk with the same serial number
-     *
-     * @return serial number
-     */
-    private String getDiskSerialNumber() {
-        //wmic diskdrive get serialnumber
-        String queryResult = executeCommand("wmic diskdrive get serialnumber");
-        //ignore SerialNumber word
-        System.out.println(queryResult);
-        String result = queryResult.replaceAll("\\s", ""); //removed formating tab/whitespaces
-        System.out.println(result);
-        return result.substring("SerialNumber".length()); //removed this word
 
-    }
 
     /**
      * reset all information and clear the ui

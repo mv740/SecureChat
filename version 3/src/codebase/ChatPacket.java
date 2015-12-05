@@ -1,5 +1,7 @@
 package codebase;
 
+import java.security.interfaces.RSAPublicKey;
+
 /**
  * ChatPacket defines the data structure with which all the network packets are organized.
  * You can replace it with your own one(s).
@@ -18,7 +20,9 @@ public class ChatPacket implements java.io.Serializable{
 	//public String password;
 	public String success;
 	byte[] cnonce;
+	byte[] snonce;
 	byte[] data;
 	byte[] signature;
+	RSAPublicKey rsaPublicKey;
 
 }

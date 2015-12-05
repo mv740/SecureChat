@@ -1,17 +1,14 @@
 package codebase;
 
+import infrastructure.ChatServer;
+
+import javax.json.Json;
+import javax.json.JsonArray;
+import javax.json.JsonReader;
 import java.io.*;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.util.Arrays;
-import java.util.Objects;
-
-import javax.json.Json;
-import javax.json.JsonArray;
-import javax.json.JsonObject;
-import javax.json.JsonReader;
-
-import infrastructure.ChatServer;
 
 /**
  * ChatServer implements the fundamental communication capabilities for your
@@ -35,15 +32,13 @@ class MyChatServer extends ChatServer {
     String statA = "";
     String statB = "";
 
-    //keys
+    //who is authenticated [Alice, Bob]
     private boolean[] Authenticated;
 
-
-    //server nonce store
+    //server nonce store. used to detect replay attack
     private byte[] serverNonceA;
     private byte[] serverNonceB;
-    private byte[] clientNonceA;
-    private byte[] clientNonceB;
+
 
     //clients Public keys
     RSAPublicKey rsaPublicKeyAlice;
@@ -51,10 +46,6 @@ class MyChatServer extends ChatServer {
 
     //server PrivateKey
     RSAPrivateKey rsaPrivateKeyServer;
-
-
-
-
 
 
     // In Constructor, the user database is loaded.
@@ -72,10 +63,10 @@ class MyChatServer extends ChatServer {
 
             //System.out.println((new File("./certificate/private/server.key.pem")));
             rsaPrivateKeyServer = Encryption.rsaLoadPrivateKey((new File("./certificate/private/server.key.pem")));
-            System.out.println("key"+rsaPrivateKeyServer.getModulus().bitLength());
-            rsaPublicKeyAlice = Encryption.rsaLoadPublicKey(new File("./certificate/alice.crt"));
-            System.out.println("key"+rsaPublicKeyAlice.getModulus().bitLength());
-            rsaPublicKeyBob = Encryption.rsaLoadPublicKey(new File("./certificate/bob.crt"));
+            //System.out.println("key" + rsaPrivateKeyServer.getModulus().bitLength());
+            //rsaPublicKeyAlice = Encryption.rsaLoadPublicKey(new File("./certificate/alice.crt"));
+            //System.out.println("key" + rsaPublicKeyAlice.getModulus().bitLength());
+            //rsaPublicKeyBob = Encryption.rsaLoadPublicKey(new File("./certificate/bob.crt"));
 
 
         } catch (FileNotFoundException e) {
@@ -83,9 +74,6 @@ class MyChatServer extends ChatServer {
             System.exit(-1);
         }
     }
-
-
-
 
 
     /**
@@ -98,11 +86,11 @@ class MyChatServer extends ChatServer {
      * byte array of the raw packet
      */
     public void PacketReceived(boolean IsA, byte[] buf) {
-        System.out.println(buf.length);
+        //System.out.println(buf.length);
         //WTF IS GOING HERE
         //buf = Arrays.copyOfRange(buf,0, 256);
-        System.out.println("2-ENCRYPTED =>"+Arrays.toString(buf));
-        System.out.println("size "+buf.length);
+        //System.out.println("2-ENCRYPTED =>"+Arrays.toString(buf));
+        //System.out.println("size "+buf.length);
 
         ByteArrayInputStream is = new ByteArrayInputStream(buf);
         ObjectInput in = null;
@@ -165,143 +153,125 @@ class MyChatServer extends ChatServer {
 
 
                 //p = Encryption.PrivateKeyDecryption1(is, rsaPrivateKeyServer);
-                System.out.println("IT WORK uid=" +p.uid);
-
-
 
 
                 if (p.request == ChatRequest.Nonce) {
-                    System.out.println("create server nonce");
 
 
-                    if(Encryption.verifySignature(p.signature,(p.uid).getBytes("UTF-8"),(IsA ? rsaPublicKeyAlice: rsaPublicKeyBob) ));
-                    {
+                    //Authentication of message, no impersonation of user
+                    if (Encryption.verifySignature(p.signature, p.rsaPublicKey.getEncoded(), p.rsaPublicKey)) {
+
                         System.out.println("VALID SIGNATURE");
-                    }
+                        //signature is valid, it is that user
+                        storePublicKeyAndClientNonce(IsA, p);
 
-                    if (IsA) {
-                        serverNonceA = Encryption.generateNonce();
+                        //create a challenge for the client
+                        System.out.println("create server nonce");
+                        byte[] nonceServer = Encryption.generateNonce();
+
+                        //send to client
+                        ChatPacket msg = new ChatPacket();
+                        msg.request = ChatRequest.Nonce;
+                        msg.uid = IsA ? statA : statB;
+                        msg.success = "ok";
+                        //msg.cnonce = IsA ? clientNonceA : clientNonceB;
+                        msg.cnonce = Encryption.privateKeyDecryptionByte(p.cnonce, rsaPrivateKeyServer);
+                        msg.snonce = Encryption.publicKeyEncryption(nonceServer, (IsA ? rsaPublicKeyAlice : rsaPublicKeyBob));
+                        msg.signature = Encryption.generateSignature(msg.cnonce, rsaPrivateKeyServer); //sign the client nonce
+                        System.out.println("send client nonce back + encrypted server nonce");
+                        SerializeNSend(IsA, msg);
                     } else {
-                        serverNonceB = Encryption.generateNonce();
+                        System.out.println("WARNING MAN IN THE MIDDLE ATTACK");
                     }
-
-                    //send to client
-                    ChatPacket msg = new ChatPacket();
-                    msg.request = ChatRequest.Nonce;
-                    //msg.uid = IsA ? statA : statB;
-                    //msg.success = "ok";
-                    msg.data = IsA ? serverNonceA : serverNonceB;
-                    System.out.println("server send Nonce " + (Arrays.toString(msg.data)));
-                    SerializeNSend(IsA, msg);
 
 
                 }
                 if (p.request == ChatRequest.LOGIN) {
-                    // We want to go through all records
-                    System.out.println("server receive client hashed");
-                    for (int i = 0; i < database.size(); i++) {
 
-
-                        JsonObject l = database.getJsonObject(i);
-
-                        String clientPassword = l.getString("password");
-                        byte[] serverHash = new byte[0];
-
-                        boolean UniqueNonce = false;
-                        if (IsA) {
-
-                            clientNounceReceivedLog(p);
-                            if (Objects.equals(Arrays.toString(clientNonceA), Arrays.toString(p.cnonce))) {
-                                //man in the middle attack, he is trying to replay attack
-                                //that cnonce was already used once !!!! WARNING
-                                this.UpdateServerLog("MAN in the middle ATTACK Detected!");
-
-                            } else {
-                                UniqueNonce = true;
-                                serverHash = Encryption.generateHash(p.cnonce, serverNonceA, clientPassword);
+                    System.out.println("server received last authentication msg");
+                    if (Encryption.verifySignature(p.signature, p.snonce, (IsA? rsaPublicKeyAlice: rsaPublicKeyBob))) {
+                        //valid signature
+                        if(IsA)
+                        {
+                            if(serverNonceA != p.snonce)
+                            {
+                                //once is unique, was never reused ... protect agains replay attack
+                                //store value for future authentication
+                                serverNonceA = p.snonce;
+                            }else
+                            {
+                                System.out.println("server nonce was already used!!! Attack detected");
                             }
-
-                        } else {
-                            clientNounceReceivedLog(p);
-                            if (Objects.equals(Arrays.toString(clientNonceB), Arrays.toString(p.cnonce))) {
-                                //man in the middle attack, he is trying to replay attack
-                                //that cnonce was already used once !!!! WARNING
-                                this.UpdateServerLog("MAN in the middle ATTACK Detected!");
-
-                            } else {
-                                UniqueNonce = true;
-                                serverHash = Encryption.generateHash(p.cnonce, serverNonceB, clientPassword);
-
-                            }
-
-
-
-
-                        }
-
-                        if (UniqueNonce) {
-                            //  //l.getString("uid").equals(p.uid)&& l.getString("password").equals(p.password)
-                            if (l.getString("uid").equals(p.uid) && Objects.equals(Arrays.toString(serverHash), Arrays.toString(p.data))) {
-
-
-                                //store unique
-                                if(IsA)
-                                    clientNonceA = p.cnonce;
-                                else
-                                    clientNonceB = p.cnonce;
-
-
-
-
-                                //hash match
-                                this.UpdateServerLog("is Alice user :" + IsA + " is really that person ! and authenticated ");
-                                System.out.println("Authenticated USER");
-                                Authenticated[getUser(IsA)] = true;
-                                // We do not allow one user to be logged in on multiple
-                                // clients
-                                if (p.uid.equals(IsA ? statB : statA))
-                                    continue;
-
-                                // Update the corresponding login status
-                                if (IsA) {
-                                    statA = l.getString("uid");
-                                } else {
-                                    statB = l.getString("uid");
-                                }
-
-                                // Update the UI to indicate this
-                                UpdateLogin(IsA, l.getString("uid"));
-
-                                // Inform the client that it was successful
-                                System.out.println("server sucessful login");
-                                RespondtoClient(IsA, "LOGIN", serverHash);
-
-                                break;
-
-                            } else {
-                                System.out.println("error login");
-                                this.UpdateServerLog("error login from user IsA" + IsA);
+                        }else
+                        {
+                            if(serverNonceB != p.snonce)
+                            {
+                                //once is unique, was never reused ... protect agains replay attack
+                                //store value for future authentication
+                                serverNonceB = p.snonce;
+                            }else
+                            {
+                                System.out.println("server nonce was already used!!! Attack detected");
                             }
                         }
 
+                        Authenticated[getUser(IsA)] = true;
+                        // We do not allow one user to be logged in on multiple
+                        // clients
+                        if (!p.uid.equals(IsA ? statB : statA)){
+                            //not already logged in
+                            if (IsA) {
+                                System.out.println("server test : uid =" +p.uid);
+                                statA = p.uid;
+                            } else {
+                                statB = p.uid;
+                            }
 
+                            // Update the UI to indicate this
+                            UpdateLogin(IsA, IsA? statA:statB);
+
+                            // Inform the client that it was successful
+                            System.out.println("server sucessful login");
+                            String message = "LOGIN";
+                            //sign successful login
+                            RespondtoClient(IsA, message,Encryption.generateSignature(message.getBytes("UTF-8"),rsaPrivateKeyServer));
+                        }
                     }
+
 
                     if ((IsA ? statA : statB).equals("")) {
                         // Oops, this means a failure, we tell the client so
-                        System.out.println("SYSTEM DENIED ACCESS");
-                        RespondtoClient(IsA, "access_denied", null);
+                        System.out.println("Server info : SYSTEM DENIED ACCESS");
+                        String message = "access_denied";
+                        //sign failure message
+                        RespondtoClient(IsA, message, Encryption.generateSignature(message.getBytes("UTF-8"),rsaPrivateKeyServer));
                     }
                 }
-
-
             }
-
 
         } catch (IOException e) {
             e.printStackTrace();
         } catch (ClassNotFoundException e) {
             e.printStackTrace();
+        }
+    }
+
+    private void storePublicKeyAndClientNonce(boolean IsA, ChatPacket p) {
+        byte[] clientNonce = Encryption.privateKeyDecryptionByte(p.cnonce, rsaPrivateKeyServer);
+
+        if (IsA) {
+            //the user sending the msg is alice
+            rsaPublicKeyAlice = p.rsaPublicKey; //store public key
+            System.out.println("stored rsaPublicKeyAlice");
+            //decrypt nonce send by alice
+            //clientNonceA = clientNonce;
+
+        } else {
+            //the user sending the msg is bob
+            rsaPublicKeyBob = p.rsaPublicKey; //store public key
+            System.out.println("stored rsaPublicKeyBob");
+            //decrypt nonce send by Bob
+            //clientNonceB = clientNonce;
         }
     }
 
@@ -345,9 +315,9 @@ class MyChatServer extends ChatServer {
             out.writeObject(p);
             byte[] packet = os.toByteArray();
 
-            System.out.println("server send packet size b4 encrypt: "+packet.length);
+            //System.out.println("server send packet size b4 encrypt: " + packet.length);
             //if alice, use her public key if not user bob's public key
-            packet = Encryption.PublicKeyEncryption(packet,IsA ? rsaPublicKeyAlice : rsaPublicKeyBob);
+            //packet = Encryption.publicKeyEncryption(packet, IsA ? rsaPublicKeyAlice : rsaPublicKeyBob);
 
             SendtoClient(IsA, packet);
 
@@ -376,14 +346,14 @@ class MyChatServer extends ChatServer {
      * p.success would be "" if failed or "LOGIN"/"LOGOUT" respectively if
      * successful
      */
-    void RespondtoClient(boolean IsA, String Success, byte[] validation) {
+    void RespondtoClient(boolean IsA, String Success, byte[] signature) {
         ChatPacket p = new ChatPacket();
         p.request = ChatRequest.RESPONSE;
         p.uid = IsA ? statA : statB;
         p.success = Success;
-        p.data = validation;
+        p.signature = signature;
 
-
+        System.out.println("server side signature" +p.signature.length);
 
 
         SerializeNSend(IsA, p);

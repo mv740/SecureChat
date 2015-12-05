@@ -100,13 +100,13 @@ public class Encryption {
     }
 
 
-    public static byte[] generateSignature(byte[] signedData, RSAPrivateKey rsaPrivateKey)
+    public static byte[] generateSignature(byte[] toBeSigned, RSAPrivateKey rsaPrivateKey)
     {
         byte[] signature =null;
         try {
             Signature signProcess = Signature.getInstance("SHA1withRSA");
             signProcess.initSign(rsaPrivateKey);
-            signProcess.update(signedData);
+            signProcess.update(toBeSigned); //Updates the data to be signed
             signature = signProcess.sign();
 
         } catch (NoSuchAlgorithmException e) {
@@ -127,7 +127,7 @@ public class Encryption {
         try {
             Signature signProcess = Signature.getInstance("SHA1withRSA");
             signProcess.initVerify(rsaPublicKey);
-            signProcess.update(signedData);
+            signProcess.update(signedData);//Updates the data to be verified
 
             isValid = signProcess.verify(signature);
             if(!isValid)
@@ -147,7 +147,7 @@ public class Encryption {
         return isValid;
     }
 
-    public static byte[] PublicKeyEncryption(byte[] plaintext, RSAPublicKey rsaPublicKey)
+    public static byte[] publicKeyEncryption(byte[] plaintext, RSAPublicKey rsaPublicKey)
     {
         Cipher cipher;
         byte[] cipherText = null;
@@ -171,7 +171,7 @@ public class Encryption {
         return cipherText;
     }
 
-    public static byte[] PublicKeyDecryption(byte[] cipherText, RSAPrivateKey rsaPrivateKey)
+    public static byte[] privateKeyDecryptionByte(byte[] cipherText, RSAPrivateKey rsaPrivateKey)
     {
         Cipher cipher;
         byte[] plainText = null;
