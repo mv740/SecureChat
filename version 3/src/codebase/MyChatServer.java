@@ -138,22 +138,28 @@ class MyChatServer extends ChatServer {
                     if (p.request == ChatRequest.CHAT) {
                         // This is a chat message
 
-                        // Whoever is sending it must be already logged in
-                        if ((IsA && statA != "") || (!IsA && statB != "")) {
-                            // Forward the original packet to the recipient
+                        byte[] hashMessage = Encryption.generateSHA256Digest(p.data);
+                        if(Encryption.verifySignature(p.signature, hashMessage, rsaPublicKeys[getUser(IsA)]))
+                        {
+                            // Whoever is sending it must be already logged in
+                            if ((IsA && statA != "") || (!IsA && statB != "")) {
+                                // Forward the original packet to the recipient
 
-                            //receiver must be logged in to received
-                            //SEND to authenticated user
-                            if (IsA && statB != "") {
-                                //send message to other user
-                                sendMessageAndRefreshSender(IsA, p);
+                                //receiver must be logged in to received
+                                //SEND to authenticated user
+                                if (IsA && statB != "") {
+                                    //send message to other user
+                                    sendMessageAndRefreshSender(IsA, p);
 
+                                }
+                                if (!IsA && statA != "") {
+                                    sendMessageAndRefreshSender(IsA, p);
+
+                                }
                             }
-                            if (!IsA && statA != "") {
-                                sendMessageAndRefreshSender(IsA, p);
+                        }else
+                            errorMITM(IsA);
 
-                            }
-                        }
                     } else if (p.request == ChatRequest.LOGOUT) {
                         if (IsA) {
                             statA = "";
@@ -275,6 +281,7 @@ class MyChatServer extends ChatServer {
                                 // Inform the client that it was successful
                                 System.out.println("server sucessful login");
                                 String message = "LOGIN";
+
                                 //sign successful login
                                 hashMessage = Encryption.generateSHA256Digest(message.getBytes("UTF-8"));
                                 RespondtoClient(IsA, message, Encryption.generateSignature(hashMessage, rsaPrivateKeyServer));
@@ -319,6 +326,7 @@ class MyChatServer extends ChatServer {
         sendStoreIV[getUser(!IsA)] = Encryption.generateIV();
         ivMessage.data = sendStoreIV[getUser(!IsA)];
         SerializeNSend(!IsA, ivMessage);
+        p.signature = Encryption.generateSignature(Encryption.generateSHA256Digest(p.data),rsaPrivateKeyServer);
         SerializeNSend(!IsA, p);
 
         //refresh ui

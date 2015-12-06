@@ -174,6 +174,7 @@ class MyChatClient extends ChatClient {
             System.out.println("client: "+uid +" send iv to server");
             SerializeNSend(ivMessage);
 
+            p.signature = Encryption.generateSignature(Encryption.generateSHA256Digest(p.data),rsaPrivateKey);
             System.out.println("client: "+uid+ "send message to server");
             SerializeNSend(p);
         }
@@ -242,11 +243,23 @@ class MyChatClient extends ChatClient {
 
                 if (p.request == ChatRequest.CHAT && !curUser.equals("")) {
                     // A new chat message received
-                    Add1Message(p.uid, curUser, p.data);
+                    byte[] hash = Encryption.generateSHA256Digest(p.data);
+                    if(Encryption.verifySignature(p.signature,hash,rsaPublicKeyServer))
+                    {
+                        Add1Message(p.uid, curUser, p.data);
+                    }
+                    else
+                        errorMITM();
                 } else if (p.request == ChatRequest.CHAT_ACK && !curUser.equals("")) {
                     // This was sent by us and now it's confirmed by the server, add
                     // it to chat history
-                    Add1Message(curUser, p.uid, p.data);
+                    byte[] hash = Encryption.generateSHA256Digest(p.data);
+                    if(Encryption.verifySignature(p.signature,hash,rsaPublicKeyServer))
+                    {
+                        Add1Message(curUser, p.uid, p.data);
+                    }
+                    else
+                        errorMITM();
                 }
 
             }else {
@@ -281,6 +294,9 @@ class MyChatClient extends ChatClient {
                     }
 
                 }
+
+
+
             }
 
             if (p.request == ChatRequest.Nonce) {
