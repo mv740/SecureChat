@@ -15,7 +15,6 @@ import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.X509EncodedKeySpec;
-import java.util.Arrays;
 
 
 /**
@@ -57,8 +56,7 @@ class MyChatServer extends ChatServer {
     //DH- exchange
     private boolean[] SECURED_MODE;
     private SecretKey[] symmetricKeyStore;
-    //store first part of the Dh exchange public key
-    byte[][] DHpublicKeyPart1Store;
+
     byte[][] ivStore;
     byte[][] sendStoreIV;
     byte[][] refreshStoreIV;
@@ -67,27 +65,26 @@ class MyChatServer extends ChatServer {
 
     // In Constructor, the user database is loaded.
     MyChatServer() {
-        try {
-            InputStream in = new FileInputStream("database.json");
-            JsonReader jsonReader = Json.createReader(in);
-            database = jsonReader.readArray();
+        //try {
+            //InputStream in = new FileInputStream("database.json");
+            //JsonReader jsonReader = Json.createReader(in);
+            //database = jsonReader.readArray();
             Authenticated = new boolean[2];
             SECURED_MODE = new boolean[2];
             symmetricKeyStore = new SecretKey[2];
-            rsaPrivateKeyServer = Encryption.rsaLoadPrivateKey((new File("./certificate/private/server.key.pem")),"1q2w");
+            rsaPrivateKeyServer = Encryption.rsaLoadPrivateKey((new File("./certificate/private/server.key.pem")), "1q2w");
             rsaPublicKeys = new RSAPublicKey[2];
             serverNonceStore = new byte[2][];
             clientNonceStore = new byte[2][];
-            DHpublicKeyPart1Store = new byte[2][];
             ivStore = new byte[2][];
             gotIv = new boolean[2];
             sendStoreIV = new byte[2][];
             refreshStoreIV = new byte[2][];
 
-        } catch (FileNotFoundException e) {
-            System.err.println("Database file not found!");
-            System.exit(-1);
-        }
+//        } catch (FileNotFoundException e) {
+//            System.err.println("Database file not found!");
+//            System.exit(-1);
+//        }
     }
 
 
@@ -101,11 +98,6 @@ class MyChatServer extends ChatServer {
      * byte array of the raw packet
      */
     public void PacketReceived(boolean IsA, byte[] buf) {
-        //System.out.println(buf.length);
-        //WTF IS GOING HERE
-        //buf = Arrays.copyOfRange(buf,0, 256);
-        //System.out.println("2-ENCRYPTED =>"+Arrays.toString(buf));
-        //System.out.println("size "+buf.length);
 
         ByteArrayInputStream is = new ByteArrayInputStream(buf);
         ObjectInput in = null;
@@ -137,8 +129,7 @@ class MyChatServer extends ChatServer {
                         // This is a chat message
 
                         byte[] hashMessage = Encryption.generateSHA256Digest(p.data);
-                        if(Encryption.verifySignature(p.signature, hashMessage, rsaPublicKeys[getUser(IsA)]))
-                        {
+                        if (Encryption.verifySignature(p.signature, hashMessage, rsaPublicKeys[getUser(IsA)])) {
                             // Whoever is sending it must be already logged in
                             if ((IsA && statA != "") || (!IsA && statB != "")) {
                                 // Forward the original packet to the recipient
@@ -155,7 +146,7 @@ class MyChatServer extends ChatServer {
 
                                 }
                             }
-                        }else
+                        } else
                             errorMITM(IsA);
 
                     } else if (p.request == ChatRequest.LOGOUT) {
@@ -180,25 +171,14 @@ class MyChatServer extends ChatServer {
 
                     if (p.request == ChatRequest.DH_PUBLIC_KEY) {
 
-                        //The DH public key is too big too be encrypted by 256 byte RSA key therefore we have split it in two message
-                        if (DHpublicKeyPart1Store[getUser(IsA)] != null) {
-                            byte[] messageHash = Encryption.generateSHA256Digest(p.data);
-                            if (Encryption.verifySignature(p.signature, messageHash, rsaPublicKeys[getUser(IsA)])) {
-                                System.out.println("server start create public key");
-                                byte[] DHpublicKey = Encryption.concatenateMessage(DHpublicKeyPart1Store[getUser(IsA)], Encryption.privateKeyDecryptionByte(p.data, rsaPrivateKeyServer));
-                                byte[] serverPublicKey = serverCreatePublicPairKey(IsA, p, DHpublicKey);
-                                sendDHPublicKeyToClientInPart(IsA, serverPublicKey);
-                                SECURED_MODE[getUser(IsA)] = true; //user is authenticated on the server side
-                                DHpublicKeyPart1Store[getUser(IsA)] = null; //remove it
-                            } else
-                                errorMITM(IsA);
-                        } else {
-                            byte[] messageHash = Encryption.generateSHA256Digest(p.data);
-                            if (Encryption.verifySignature(p.signature, messageHash, rsaPublicKeys[getUser(IsA)])) {
-                                DHpublicKeyPart1Store[getUser(IsA)] = Encryption.privateKeyDecryptionByte(p.data, rsaPrivateKeyServer);
-                            } else
-                                errorMITM(IsA);
-                        }
+                        byte[] messageHash = Encryption.generateSHA256Digest(p.data);
+                        if (Encryption.verifySignature(p.signature, messageHash, rsaPublicKeys[getUser(IsA)])) {
+                            System.out.println("server start create public key");
+                            byte[] serverPublicKey = serverCreatePublicPairKey(IsA, p.data);
+                            sendDHPublicKeyToClient(IsA, serverPublicKey);
+                            SECURED_MODE[getUser(IsA)] = true; //user is authenticated on the server side
+                        } else
+                            errorMITM(IsA);
                     }
                 }
             } else {
@@ -220,7 +200,7 @@ class MyChatServer extends ChatServer {
                         //signature is valid, it is that user
 
                         byte[] clientNonce = Encryption.privateKeyDecryptionByte(p.cnonce, rsaPrivateKeyServer);
-                        if(clientNonceStore[getUser(IsA)] != clientNonce){
+                        if (clientNonceStore[getUser(IsA)] != clientNonce) {
                             storePublicKeyAndClientNonce(IsA, p, clientNonce);
 
                             //create a challenge for the client
@@ -242,7 +222,7 @@ class MyChatServer extends ChatServer {
                             msg.signature = Encryption.generateSignature(hashMessage, rsaPrivateKeyServer); //sign the client hashedMessage
                             System.out.println("send client nonce back + encrypted server nonce");
                             SerializeNSend(IsA, msg);
-                        }else
+                        } else
                             errorReplayAttack();
 
                     } else {
@@ -284,8 +264,8 @@ class MyChatServer extends ChatServer {
                                 hashMessage = Encryption.generateSHA256Digest(message.getBytes("UTF-8"));
                                 RespondtoClient(IsA, message, Encryption.generateSignature(hashMessage, rsaPrivateKeyServer));
 
-                        } else
-                            errorReplayAttack();
+                            } else
+                                errorReplayAttack();
                         }
                     }
                     if ((IsA ? statA : statB).equals("")) {
@@ -315,7 +295,7 @@ class MyChatServer extends ChatServer {
      * then send iv + encrypted ack to original sender
      *
      * @param IsA user
-     * @param p message
+     * @param p   message
      */
     private void sendMessageAndRefreshSender(boolean IsA, ChatPacket p) {
         //send message to other user
@@ -324,7 +304,7 @@ class MyChatServer extends ChatServer {
         sendStoreIV[getUser(!IsA)] = Encryption.generateIV();
         ivMessage.data = sendStoreIV[getUser(!IsA)];
         SerializeNSend(!IsA, ivMessage);
-        p.signature = Encryption.generateSignature(Encryption.generateSHA256Digest(p.data),rsaPrivateKeyServer);
+        p.signature = Encryption.generateSignature(Encryption.generateSHA256Digest(p.data), rsaPrivateKeyServer);
         SerializeNSend(!IsA, p);
 
         //refresh ui
@@ -347,31 +327,24 @@ class MyChatServer extends ChatServer {
     /**
      * Diffie-Hellman public key is too big to encrypted by our RSA public key so we need to split it into two message
      * each part is encrypted and the signed
+     *
      * @param IsA
      * @param serverPublicKey
      */
-    private void sendDHPublicKeyToClientInPart(boolean IsA, byte[] serverPublicKey) {
-        //split key because it is too big to be encrypted by RSA key
-        byte[] firstPart = Arrays.copyOfRange(serverPublicKey, 0, 245);
-        byte[] lastPart = Arrays.copyOfRange(serverPublicKey, 245, serverPublicKey.length);
+    private void sendDHPublicKeyToClient(boolean IsA, byte[] serverPublicKey) {
 
         //send to client
         ChatPacket msg = new ChatPacket();
         msg.request = ChatRequest.DH_PUBLIC_KEY;
         msg.uid = IsA ? statA : statB;
         msg.success = "Success";
-        msg.data = Encryption.publicKeyEncryption(firstPart, (rsaPublicKeys[getUser(IsA)]));
+        msg.data = serverPublicKey;
         byte[] messageHash = Encryption.generateSHA256Digest(msg.data);
         msg.signature = Encryption.generateSignature(messageHash, rsaPrivateKeyServer);
         SerializeNSend(IsA, msg);
-        //second part
-
-        msg.data = Encryption.publicKeyEncryption(lastPart, (rsaPublicKeys[getUser(IsA)]));
-        messageHash = Encryption.generateSHA256Digest(msg.data);
-        msg.signature = Encryption.generateSignature(messageHash, rsaPrivateKeyServer);
         System.out.println("server send server public key");
         System.out.println("server side secured-mode activated for " + IsA);
-        SerializeNSend(IsA, msg);
+
     }
 
     /**
@@ -382,7 +355,7 @@ class MyChatServer extends ChatServer {
      * @param DHpublicKey
      * @return serverPublicKey
      */
-    private byte[] serverCreatePublicPairKey(boolean IsA, ChatPacket p, byte[] DHpublicKey) {
+    private byte[] serverCreatePublicPairKey(boolean IsA,byte[] DHpublicKey) {
 
         byte[] serverPublicKey = null;
 
@@ -441,7 +414,7 @@ class MyChatServer extends ChatServer {
     private void storePublicKeyAndClientNonce(boolean IsA, ChatPacket p, byte[] clientNonce) {
 
         rsaPublicKeys[getUser(IsA)] = p.rsaPublicKey;
-        clientNonceStore[getUser(IsA)]= clientNonce;
+        clientNonceStore[getUser(IsA)] = clientNonce;
 
     }
 

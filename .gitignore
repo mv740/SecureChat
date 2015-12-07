@@ -7,3 +7,5 @@ bin/
 .settings
 *.IV
 *.json
+version 3/out/
+version 3/version 3.iml

@@ -48,7 +48,6 @@ class MyChatClient extends ChatClient {
     private SecretKey symmetricKeyAES;
     boolean SECURED_MODE;
 
-    byte[] firstPartOFpublicKeyDH;
     byte[] ivStore;
     byte[] sendIV;
     boolean gotIV =false;
@@ -273,26 +272,13 @@ class MyChatClient extends ChatClient {
                 if(p.request == ChatRequest.DH_PUBLIC_KEY)
                 {
                     System.out.println("client receive public from server");
-                    if(firstPartOFpublicKeyDH != null)
-                    {
                         byte [] messageHash = Encryption.generateSHA256Digest(p.data);
                         if(Encryption.verifySignature(p.signature,messageHash,rsaPublicKeyServer))
                         {
-                            byte[] publicKeyComplete = Encryption.concatenateMessage(firstPartOFpublicKeyDH, Encryption.privateKeyDecryptionByte(p.data,rsaPrivateKey));
-                            firstPartOFpublicKeyDH = null;
-                            generateSharedSecretKey(p, publicKeyComplete);
+                            byte[] publicKey = Encryption.privateKeyDecryptionByte(p.data,rsaPrivateKey);
+                            generateSharedSecretKey(publicKey);
                         }else
                             errorMITM();
-                    }else
-                    {
-                        byte [] messageHash = Encryption.generateSHA256Digest(p.data);
-                        if(Encryption.verifySignature(p.signature,messageHash,rsaPublicKeyServer))
-                        {
-                            firstPartOFpublicKeyDH = Encryption.privateKeyDecryptionByte(p.data,rsaPrivateKey);
-                        }else
-                            errorMITM();
-                    }
-
                 }
 
 
@@ -398,7 +384,7 @@ class MyChatClient extends ChatClient {
         reset();
     }
 
-    private void generateSharedSecretKey(ChatPacket p, byte[] publicKeyComplete) {
+    private void generateSharedSecretKey(byte[] publicKeyComplete) {
         try {
 
             //client private key
@@ -560,26 +546,14 @@ class MyChatClient extends ChatClient {
             keyPairClient = kpg.generateKeyPair();
             byte[] clientPublicKeyPair = keyPairClient.getPublic().getEncoded();
 
-            //split DH public key because it is too big to be encrypted by our RSA key
-            byte[] firstPart = Arrays.copyOfRange(clientPublicKeyPair,0,245);
-            byte[] lastPart = Arrays.copyOfRange(clientPublicKeyPair,245,clientPublicKeyPair.length);
-
             //send public key to server
             ChatPacket newMSG = new ChatPacket();
             newMSG.request = ChatRequest.DH_PUBLIC_KEY;
             newMSG.uid = uid;
-            newMSG.data = Encryption.publicKeyEncryption(firstPart,rsaPublicKeyServer);
+            newMSG.data = clientPublicKeyPair;
             byte[] messageHash = Encryption.generateSHA256Digest(newMSG.data);
             newMSG.signature = Encryption.generateSignature(messageHash,rsaPrivateKey);
             System.out.println("client send public key");
-
-            SerializeNSend(newMSG);
-
-            //send public key to server
-            newMSG.data = Encryption.publicKeyEncryption(lastPart,rsaPublicKeyServer);
-            messageHash = Encryption.generateSHA256Digest(newMSG.data);
-            newMSG.signature = Encryption.generateSignature(messageHash,rsaPrivateKey);
-            System.out.println("client send public key part 2");
 
             SerializeNSend(newMSG);
 
