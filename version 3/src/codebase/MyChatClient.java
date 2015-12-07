@@ -127,7 +127,7 @@ class MyChatClient extends ChatClient {
     public void FileLocationReceivedPriv(File path) {
         // TODO
         System.out.println("FileLocationReceivedPriv");
-        rsaPrivateKey = Encryption.rsaLoadPrivateKey(path);
+        rsaPrivateKey = Encryption.rsaLoadPrivateKey(path,"1q2w");
     }
 
     /**
@@ -220,7 +220,7 @@ class MyChatClient extends ChatClient {
             {
                 if(gotIV)
                 {
-                    p = Encryption.AESdecrypt(is, symmetricKeyAES, ivStore);
+                    p = Encryption.decryptWithAES(is, symmetricKeyAES, ivStore);
                     gotIV=false; //used iv so reset
                     ivStore=null;
                     System.out.println("client:"+uid+" Used IV ");
@@ -415,7 +415,7 @@ class MyChatClient extends ChatClient {
 
             //create shared AES symmetric key
             byte sharedSecret[] = keyAgreement.generateSecret();
-            symmetricKeyAES = Encryption.generateAESKey(sharedSecret);
+            symmetricKeyAES = Encryption.generateAESKeyFromShareSecret(sharedSecret, Encryption.KeySize.KEY256);
 
             SECURED_MODE = true;
 
@@ -499,7 +499,7 @@ class MyChatClient extends ChatClient {
 
             if(Authenticated && SECURED_MODE && p.request !=ChatRequest.IV)
             {
-                packet = Encryption.AESencrypt(packet,symmetricKeyAES, sendIV);
+                packet = Encryption.encryptWithAES(packet,symmetricKeyAES, sendIV);
             }
 
             SendtoServer(packet);

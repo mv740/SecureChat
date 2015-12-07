@@ -9,7 +9,6 @@ import javax.crypto.spec.DHParameterSpec;
 import javax.json.Json;
 import javax.json.JsonArray;
 import javax.json.JsonReader;
-import javax.print.attribute.standard.MediaSize;
 import java.io.*;
 import java.security.*;
 import java.security.interfaces.RSAPrivateKey;
@@ -17,7 +16,6 @@ import java.security.interfaces.RSAPublicKey;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.Arrays;
-import java.util.Objects;
 
 
 /**
@@ -76,7 +74,7 @@ class MyChatServer extends ChatServer {
             Authenticated = new boolean[2];
             SECURED_MODE = new boolean[2];
             symmetricKeyStore = new SecretKey[2];
-            rsaPrivateKeyServer = Encryption.rsaLoadPrivateKey((new File("./certificate/private/server.key.pem")));
+            rsaPrivateKeyServer = Encryption.rsaLoadPrivateKey((new File("./certificate/private/server.key.pem")),"1q2w");
             rsaPublicKeys = new RSAPublicKey[2];
             serverNonceStore = new byte[2][];
             clientNonceStore = new byte[2][];
@@ -124,7 +122,7 @@ class MyChatServer extends ChatServer {
                 if (SECURED_MODE[getUser(IsA)]) {
 
                     if (gotIv[getUser(IsA)]) {
-                        p = Encryption.AESdecrypt(is, symmetricKeyStore[getUser(IsA)], ivStore[getUser(IsA)]);
+                        p = Encryption.decryptWithAES(is, symmetricKeyStore[getUser(IsA)], ivStore[getUser(IsA)]);
                         gotIv[getUser(IsA)] = false; //used iv so reset
                         ivStore[getUser(IsA)] = null;
                     } else {
@@ -436,7 +434,7 @@ class MyChatServer extends ChatServer {
 
     private void generateSharedAESKey(boolean IsA, byte[] sharedSecret) {
         //create shared AES symmetric key
-        SecretKey symmetricKeyAES = Encryption.generateAESKey(sharedSecret);
+        SecretKey symmetricKeyAES = Encryption.generateAESKeyFromShareSecret(sharedSecret, Encryption.KeySize.KEY256);
         symmetricKeyStore[getUser(IsA)] = symmetricKeyAES;
     }
 
@@ -484,9 +482,9 @@ class MyChatServer extends ChatServer {
             if (SECURED_MODE[getUser(IsA)] && Authenticated[getUser(IsA)] && p.request != ChatRequest.IV) {
 
                 if (p.request == ChatRequest.CHAT_ACK) {
-                    packet = Encryption.AESencrypt(packet, symmetricKeyStore[getUser(IsA)], refreshStoreIV[getUser(IsA)]);
+                    packet = Encryption.encryptWithAES(packet, symmetricKeyStore[getUser(IsA)], refreshStoreIV[getUser(IsA)]);
                 } else
-                    packet = Encryption.AESencrypt(packet, symmetricKeyStore[getUser(IsA)], sendStoreIV[getUser(IsA)]);
+                    packet = Encryption.encryptWithAES(packet, symmetricKeyStore[getUser(IsA)], sendStoreIV[getUser(IsA)]);
 
             }
             SendtoClient(IsA, packet);
