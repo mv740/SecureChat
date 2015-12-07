@@ -275,7 +275,7 @@ class MyChatClient extends ChatClient {
                         byte [] messageHash = Encryption.generateSHA256Digest(p.data);
                         if(Encryption.verifySignature(p.signature,messageHash,rsaPublicKeyServer))
                         {
-                            byte[] publicKey = Encryption.privateKeyDecryptionByte(p.data,rsaPrivateKey);
+                            byte[] publicKey =p.data;
                             generateSharedSecretKey(publicKey);
                         }else
                             errorMITM();
