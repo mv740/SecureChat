@@ -10,22 +10,14 @@ import java.io.ObjectInput;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutput;
 import java.io.ObjectOutputStream;
-import java.security.*;
-import java.security.spec.InvalidKeySpecException;
-import java.security.spec.X509EncodedKeySpec;
 import java.util.Arrays;
-import java.util.EmptyStackException;
 import java.util.Objects;
 
-import javax.crypto.*;
-import javax.crypto.interfaces.DHPublicKey;
-import javax.crypto.spec.DHParameterSpec;
 import javax.json.Json;
 import javax.json.JsonArray;
 import javax.json.JsonObject;
 import javax.json.JsonReader;
 
-import com.sun.org.apache.bcel.internal.generic.IADD;
 import infrastructure.ChatServer;
 
 /**
@@ -55,11 +47,8 @@ class MyChatServer extends ChatServer {
 
 
     //server nonce store
-    private byte[] serverNonceA;
-    private byte[] serverNonceB;
-    private byte[] clientNonceA;
-    private byte[] clientNonceB;
-
+    private byte[][] serverNonce;
+    private byte[][] clientNonce;
 
     // In Constructor, the user database is loaded.
     MyChatServer() {
@@ -68,6 +57,8 @@ class MyChatServer extends ChatServer {
             JsonReader jsonReader = Json.createReader(in);
             database = jsonReader.readArray();
             Authenticated = new boolean[2];
+            serverNonce = new byte[2][];
+            clientNonce = new byte[2][];
 
 
         } catch (FileNotFoundException e) {
@@ -110,7 +101,7 @@ class MyChatServer extends ChatServer {
                     }
                     UpdateLogin(IsA, "");
                     RespondtoClient(IsA, "LOGOUT", null);
-                    securedConnectionStop(IsA);
+                    authenticatedConnectionStop(IsA);
 
 
                 } else if (p.request == ChatRequest.CHAT) {
@@ -148,18 +139,14 @@ class MyChatServer extends ChatServer {
                     System.out.println("create server nonce");
 
 
-                    if (IsA) {
-                        serverNonceA = Encryption.generateNonce();
-                    } else {
-                        serverNonceB = Encryption.generateNonce();
-                    }
+                    serverNonce[getUser(IsA)] = Encryption.generateNonce();
 
                     //send to client
                     ChatPacket msg = new ChatPacket();
                     msg.request = ChatRequest.Nonce;
                     msg.uid = IsA ? statA : statB;
                     msg.success = "Success";
-                    msg.data = IsA ? serverNonceA : serverNonceB;
+                    msg.data = serverNonce[getUser(IsA)];
                     System.out.println("server send Nonce " + (Arrays.toString(msg.data)));
                     SerializeNSend(IsA, msg);
 
@@ -177,59 +164,36 @@ class MyChatServer extends ChatServer {
                         byte[] serverHash = new byte[0];
 
                         boolean UniqueNonce = false;
-                        if (IsA) {
 
-                            clientNounceReceivedLog(p);
-                            if (Objects.equals(Arrays.toString(clientNonceA), Arrays.toString(p.cnonce))) {
-                                //man in the middle attack, he is trying to replay attack
-                                //that cnonce was already used once !!!! WARNING
-                                this.UpdateServerLog("MAN in the middle ATTACK Detected!");
-
-                            } else {
-                                UniqueNonce = true;
-                                serverHash = Encryption.generateHash(p.cnonce, serverNonceA, clientPassword);
-                            }
+                        clientNounceReceivedLog(p);
+                        if (Objects.equals(Arrays.toString(clientNonce[getUser(IsA)]), Arrays.toString(p.cnonce))) {
+                            //man in the middle attack, he is trying to replay attack
+                            //that cnonce was already used once !!!! WARNING
+                            this.UpdateServerLog("MAN in the middle ATTACK Detected!");
 
                         } else {
-                            clientNounceReceivedLog(p);
-                            if (Objects.equals(Arrays.toString(clientNonceB), Arrays.toString(p.cnonce))) {
-                                //man in the middle attack, he is trying to replay attack
-                                //that cnonce was already used once !!!! WARNING
-                                this.UpdateServerLog("MAN in the middle ATTACK Detected!");
-
-                            } else {
-                                UniqueNonce = true;
-                                serverHash = Encryption.generateHash(p.cnonce, serverNonceB, clientPassword);
-
-                            }
-
-
-
-
+                            UniqueNonce = true;
+                            serverHash = Encryption.generateHash(p.cnonce, serverNonce[getUser(IsA)], clientPassword);
                         }
+
 
                         if (UniqueNonce) {
                             //  //l.getString("uid").equals(p.uid)&& l.getString("password").equals(p.password)
                             if (l.getString("uid").equals(p.uid) && Objects.equals(Arrays.toString(serverHash), Arrays.toString(p.data))) {
 
-
-                                //store unique
-                                if(IsA)
-                                    clientNonceA = p.cnonce;
-                                else
-                                    clientNonceB = p.cnonce;
-
-
-
-
-                                //hash match
-                                this.UpdateServerLog("is Alice user :" + IsA + " is really that person ! and authenticated ");
-                                System.out.println("Authenticated USER");
-                                Authenticated[getUser(IsA)] = true;
                                 // We do not allow one user to be logged in on multiple
                                 // clients
                                 if (p.uid.equals(IsA ? statB : statA))
                                     continue;
+
+                                //store unique
+                                clientNonce[getUser(IsA)] = p.cnonce;
+
+                                //hash match
+                                this.UpdateServerLog("is Alice user :" + IsA + " is really that person ! and authenticated ");
+                                System.out.println("Authenticated USER");
+                                // Authenticated[getUser(IsA)] = true;
+                                authenticatedConnectionStart(IsA);
 
                                 // Update the corresponding login status
                                 if (IsA) {
@@ -262,10 +226,7 @@ class MyChatServer extends ChatServer {
                         RespondtoClient(IsA, "access_denied", null);
                     }
                 }
-
-
             }
-
 
         } catch (IOException e) {
             e.printStackTrace();
@@ -352,18 +313,16 @@ class MyChatServer extends ChatServer {
         SerializeNSend(IsA, p);
     }
 
-
-    private void securedConnectionStart(ChatPacket p, Boolean IsA) {
+    private void authenticatedConnectionStart(Boolean IsA) {
         if (IsA) {
-            this.UpdateServerLog("server initiate secured connection with alice");
+            this.UpdateServerLog("server initiate authenticated connection with alice");
         } else
-            this.UpdateServerLog("server initiate secured connection with Bob");
+            this.UpdateServerLog("server initiate authenticated connection with Bob");
         Authenticated[getUser(IsA)] = true;
     }
 
 
-    private void securedConnectionStop(Boolean IsA) {
-        //System.out.println("DEACTIVATED ENCRYPTION");
+    private void authenticatedConnectionStop(Boolean IsA) {
         if (IsA) {
             this.UpdateServerLog("server stop authenticated connection with alice");
         } else
