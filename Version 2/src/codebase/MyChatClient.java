@@ -1,7 +1,6 @@
 package codebase;
 
 import java.io.*;
-import java.security.*;
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -194,17 +193,15 @@ class MyChatClient extends ChatClient {
                 clientNonce = Encryption.generateNonce();
                 byte[] serverNonce = p.data;
                 //hash(cnonce+nonce+password
-                System.out.println("server once received:" + Arrays.toString(p.data));
+                //System.out.println("server once received:" + Arrays.toString(p.data));
                 clienthash = Encryption.generateHash(clientNonce, serverNonce, password);
-
                 //try to authenticated
                 ChatPacket loginMsg = new ChatPacket();
-                System.out.println("client nonce send "+clientNonce.length);
                 loginMsg.request = ChatRequest.LOGIN;
                 loginMsg.uid = this.uid;
                 loginMsg.data = clienthash;
                 loginMsg.cnonce = clientNonce;
-                System.out.println("client nonce +" +Arrays.toString(clientNonce));
+                //System.out.println("client nonce +" +Arrays.toString(clientNonce));
                 System.out.println("client send hashed password+cnonce+nonce");
                 SerializeNSend(loginMsg);
 
@@ -240,8 +237,7 @@ class MyChatClient extends ChatClient {
                     // to decrypt it, you will need you physically own  the hard disk
                     //http://superuser.com/questions/498083/how-to-get-hard-drive-serial-number-from-command-line
                     String uniqueHostIdentifier = getDiskSerialNumber();
-                    LogKey = Encryption.generateKey(uniqueHostIdentifier.getBytes());
-
+                    LogKey = Encryption.generateKeyAES(uniqueHostIdentifier.getBytes());
 
                     //ins = new FileInputStream(this.getChatLogPath());
                     try {
@@ -431,9 +427,9 @@ class MyChatClient extends ChatClient {
         //wmic diskdrive get serialnumber
         String queryResult = executeCommand("wmic diskdrive get serialnumber");
         //ignore SerialNumber word
-        System.out.println(queryResult);
+        System.out.println("DiskDrive - " +queryResult);
         String result = queryResult.replaceAll("\\s", ""); //removed formating tab/whitespaces
-        System.out.println(result);
+        //System.out.println(result);
         return result.substring("SerialNumber".length()); //removed this word
 
     }

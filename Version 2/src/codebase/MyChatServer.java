@@ -138,16 +138,14 @@ class MyChatServer extends ChatServer {
                 if (p.request == ChatRequest.Nonce) {
                     System.out.println("create server nonce");
 
-
                     serverNonce[getUser(IsA)] = Encryption.generateNonce();
-
                     //send to client
                     ChatPacket msg = new ChatPacket();
                     msg.request = ChatRequest.Nonce;
                     msg.uid = IsA ? statA : statB;
                     msg.success = "Success";
                     msg.data = serverNonce[getUser(IsA)];
-                    System.out.println("server send Nonce " + (Arrays.toString(msg.data)));
+                    //System.out.println("server send Nonce " + (Arrays.toString(msg.data)));
                     SerializeNSend(IsA, msg);
 
 
@@ -165,7 +163,7 @@ class MyChatServer extends ChatServer {
 
                         boolean UniqueNonce = false;
 
-                        clientNounceReceivedLog(p);
+                        //clientNounceReceivedLog(p);
                         if (Objects.equals(Arrays.toString(clientNonce[getUser(IsA)]), Arrays.toString(p.cnonce))) {
                             //man in the middle attack, he is trying to replay attack
                             //that cnonce was already used once !!!! WARNING
@@ -175,10 +173,7 @@ class MyChatServer extends ChatServer {
                             UniqueNonce = true;
                             serverHash = Encryption.generateHash(p.cnonce, serverNonce[getUser(IsA)], clientPassword);
                         }
-
-
                         if (UniqueNonce) {
-                            //  //l.getString("uid").equals(p.uid)&& l.getString("password").equals(p.password)
                             if (l.getString("uid").equals(p.uid) && Objects.equals(Arrays.toString(serverHash), Arrays.toString(p.data))) {
 
                                 // We do not allow one user to be logged in on multiple
@@ -211,7 +206,12 @@ class MyChatServer extends ChatServer {
 
                                 break;
 
-                            } else {
+                            } else if(l.getString("uid").equals(p.uid)) {
+                                //checking uid because we are looping through the database. if you are alice you find password in 1 loop
+                                // bob will need 2, because 1 loop will not match
+                                //we only considered a login error if you are the specific user and
+                                // we find your password in the database but it didn't match to the hash you send
+
                                 System.out.println("error login");
                                 this.UpdateServerLog("error login from user IsA" + IsA);
                             }

@@ -16,25 +16,17 @@ import java.util.regex.Pattern;
 public class Encryption {
 
 
-    public static SecretKey generateKey(byte[] sharedSecret) {
+    public static SecretKey generateKeyAES(byte[] secret) {
         MessageDigest md;
         SecretKey aesKey = null;
         try {
             md = MessageDigest.getInstance("SHA-256");
-
-            byte[] hashSharedKey = md.digest(sharedSecret);
-
+            byte[] hashSharedKey = md.digest(secret);
             //http://www.javamex.com/tutorials/cryptography/unrestricted_policy_files.shtml
             //It turns out that the Cipher class will generally not allow encryption with a key size of more than 128 bits
             byte[] AES128key = new byte[hashSharedKey.length / 2]; //we need 128 bit but we have 256 bits
-
-            for (int i = 0; i < AES128key.length; i++) {
-                //http://stackoverflow.com/questions/22410602/turn-string-to-128-bit-key-for-aes
-                AES128key[i] = (byte) (hashSharedKey[i] ^ hashSharedKey[i + AES128key.length]); //XOR therefore we use all of them
-            }
-
+            System.arraycopy(hashSharedKey, 0, AES128key, 0, AES128key.length); //take the first 128 bit of the hash
             aesKey = new SecretKeySpec(AES128key, "AES");
-
         } catch (NoSuchAlgorithmException e) {
             e.printStackTrace();
         }
@@ -61,20 +53,10 @@ public class Encryption {
             cipher.init(Cipher.ENCRYPT_MODE, key, new IvParameterSpec(iv));
             outputStream = new CipherOutputStream(new FileOutputStream(fileLocation), cipher);
 
-        } catch (NoSuchAlgorithmException e) {
-            e.printStackTrace();
-        } catch (InvalidAlgorithmParameterException e) {
-            e.printStackTrace();
-        } catch (NoSuchPaddingException e) {
-            e.printStackTrace();
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
-        } catch (InvalidKeyException e) {
+        } catch (NoSuchAlgorithmException | InvalidKeyException | FileNotFoundException | NoSuchPaddingException | InvalidAlgorithmParameterException e) {
             e.printStackTrace();
         }
-
         return outputStream;
-
     }
 
 
@@ -89,7 +71,6 @@ public class Encryption {
         String name = findUserByLog(fileLocation);
         return "log/"+name+".IV";
     }
-
 
     private static String findUserByLog(String fileLocation) {
         Pattern pattern = Pattern.compile("/(.+?).json");
@@ -161,11 +142,14 @@ public class Encryption {
 
     }
 
-
     public static byte[] generateIV()
     {
         byte[] iv = new byte[16];
         try {
+            //https://www.cigital.com/blog/proper-use-of-javas-securerandom/
+            //SecureRandom secureRandom = SecureRandom.getInstance("SHA1PRNG");
+            //http://docs.oracle.com/javase/8/docs/api/java/security/SecureRandom.html#getInstanceStrong--
+            //SecureRandom secureRandom = SecureRandom.getInstanceStrong();
             SecureRandom secureRandom = SecureRandom.getInstanceStrong();
             secureRandom.nextBytes(iv);
 
@@ -176,18 +160,9 @@ public class Encryption {
 
     }
 
+    //a nonce is random number therefore reusing the generateIV method which produce the same value
     public static byte[] generateNonce() {
-        //https://www.cigital.com/blog/proper-use-of-javas-securerandom/
-        //SecureRandom secureRandom = SecureRandom.getInstance("SHA1PRNG");
-        //http://docs.oracle.com/javase/8/docs/api/java/security/SecureRandom.html#getInstanceStrong--
-        //SecureRandom secureRandom = SecureRandom.getInstanceStrong();
-        SecureRandom secureRandom = new SecureRandom();
-        byte[] bytes = new byte[16];
-        secureRandom.nextBytes(bytes);
-
-        return bytes;
-
-
+        return generateIV();
     }
 
     public static byte[] generateHash(byte[] clientNonce, byte[] serverNonce,String password)
